@@ -1,0 +1,7 @@
+name = "dev-widgets"
+version = "0.0.1"
+defaultTargets = ["DevWidgets"]
+
+[[lean_lib]]
+name = "DevWidgets"
+roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DHover"]
