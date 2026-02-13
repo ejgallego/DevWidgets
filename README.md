@@ -9,8 +9,8 @@ See some [examples](./examples).
 
 ## `DevWidgets.CE`
 
-An interactive complement to `set_option compiler.trace`, shows IR and
-LCNF if available, with folding.
+An interactive complement to some `set_option trace.Compiler.*`, shows
+IR and LCNF if available, with folding.
 
 ## `DevWidgets.PTracker`
 
@@ -19,7 +19,7 @@ your elaboration routine can use this widget to display progress.
 
 ## `DevWidgets.InfoTreeExplorer`
 
-An interactive complement to `set_option trace.Elab.Info`.
+An interactive complement to `set_option trace.Elab.Info`. It shows infoTree, snapsho
 
 ## `DevWidgets.DHover`
 
@@ -30,4 +30,4 @@ Reports information about the snapshot under hover.
 - Refactor Snapshot code into a lib for common consumption.
 - Common panel for all widgets
 - PTracker Report stats, histogram
-- 
+
