@@ -5,120 +5,219 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
+import DevWidgets.PTracker.ProgressRef
 
 open Lean Server
 
-namespace DevWidgets.IorefWidget
+namespace DevWidgets.PTracker
 
-/-- In-memory record for one tracked progress ref. -/
-structure TrackedProgressRef where
-  id : Nat
-  valueRef : IO.Ref String
-  createdAtNs : Nat
-  lastUpdatedAtNs : Nat
-
-/-- JSON-safe snapshot returned to the widget frontend. -/
-structure ProgressSnapshot where
-  id : Nat
-  value : String
-  createdAtNs : Nat
-  lastUpdatedAtNs : Nat
+structure ReadProgressViewParams where
   deriving ToJson, FromJson
 
-/-- Mutable registry of all currently tracked refs. -/
-initialize trackedProgressRefs : IO.Ref (Array TrackedProgressRef) ← IO.mkRef #[]
-initialize nextProgressRefId : IO.Ref Nat ← IO.mkRef 0
-
-/-- Creates a new tracked progress ref and returns its unique id. -/
-def createProgressRef (initialValue : String := "") : IO Nat := do
-  let createdAtNs ← IO.monoNanosNow
-  let valueRef ← IO.mkRef initialValue
-  let refId ← nextProgressRefId.get
-  nextProgressRefId.set (refId + 1)
-  let refs ← trackedProgressRefs.get
-  trackedProgressRefs.set (refs.push {
-    id := refId
-    valueRef := valueRef
-    createdAtNs := createdAtNs
-    lastUpdatedAtNs := createdAtNs
-  })
-  pure refId
-
-/--
-Removes a tracked progress ref by id.
-
-Returns `true` when a ref with this id existed and was removed, and `false`
-when no matching ref was present (no-op).
--/
-def destroyProgressRef (refId : Nat) : IO Bool := do
-  let refs ← trackedProgressRefs.get
-  let refs' := refs.filter (fun entry => entry.id != refId)
-  trackedProgressRefs.set refs'
-  pure (refs'.size != refs.size)
-
-/--
-Updates a tracked ref value and refreshes its `lastUpdatedAtNs` timestamp.
-Returns `false` when the id is unknown.
--/
-def updateProgressRef (refId : Nat) (newValue : String) : IO Bool := do
-  let nowNs ← IO.monoNanosNow
-  let refs ← trackedProgressRefs.get
-  let mut found := false
-  let mut refs' := Array.mkEmpty refs.size
-  for entry in refs do
-    if entry.id == refId then
-      entry.valueRef.set newValue
-      refs' := refs'.push { entry with lastUpdatedAtNs := nowNs }
-      found := true
-    else
-      refs' := refs'.push entry
-  trackedProgressRefs.set refs'
-  pure found
-
-/-- Materialize the current registry into JSON-safe snapshots for the widget. -/
-private def listProgressSnapshots : IO (Array ProgressSnapshot) := do
-  let refs ← trackedProgressRefs.get
-  let refs := refs.qsort (fun a b => a.createdAtNs < b.createdAtNs)
-  let mut out := Array.mkEmpty refs.size
-  for entry in refs do
-    let value ← entry.valueRef.get
-    out := out.push {
-      id := entry.id
-      value := value
-      createdAtNs := entry.createdAtNs
-      lastUpdatedAtNs := entry.lastUpdatedAtNs
-    }
-  pure out
-
-structure ReadCounterParams where
+structure ProgressView where
+  nowNs : Nat
+  entries : Array TrackedProgressRef
   deriving ToJson, FromJson
 
 @[server_rpc_method]
-meta def readCounterRpc (_ : ReadCounterParams) : RequestM (RequestTask (Array ProgressSnapshot)) :=
+meta def readProgressViewRpc (_ : ReadProgressViewParams) : RequestM (RequestTask ProgressView) :=
   RequestM.asTask do
-    listProgressSnapshots
+    let nowNs ← IO.monoNanosNow
+    let entries ← listProgressRefs
+    pure { nowNs := nowNs, entries := entries }
+
+structure DeleteProgressRefParams where
+  id : Nat
+  deriving ToJson, FromJson
+
+@[server_rpc_method]
+meta def deleteProgressRefRpc (params : DeleteProgressRefParams) : RequestM (RequestTask Bool) :=
+  RequestM.asTask do
+    deleteProgressRef params.id
+    pure true
 
 @[widget_module]
-def ioRefWidget : Lean.Widget.Module where
+def progressWidget : Lean.Widget.Module where
   javascript := "
 import * as React from 'react';
 import { useRpcSession } from '@leanprover/infoview';
 
 const e = React.createElement;
 
-export default function IoRefWidget() {
+export default function ProgressWidget() {
+  const RETAIN_DONE_MS = 20_000;
   const rpc = useRpcSession();
   const [entries, setEntries] = React.useState([]);
   const [manualLoading, setManualLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [autoEnabled, setAutoEnabled] = React.useState(true);
   const [periodMs, setPeriodMs] = React.useState(250);
+  const [serverNowNs, setServerNowNs] = React.useState(0);
+  const [serverNowAtMs, setServerNowAtMs] = React.useState(Date.now());
+  const [, setClockTick] = React.useState(0);
   const inFlight = React.useRef(false);
+  const pendingDeleteIds = React.useRef(new Set());
+
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setClockTick((tick) => tick + 1);
+    }, 250);
+    return () => clearInterval(id);
+  }, []);
+
+  const estimatedNowNs = serverNowNs + Math.max(0, Date.now() - serverNowAtMs) * 1_000_000;
 
   function formatMonoSeconds(ns) {
     if (!Number.isFinite(ns)) return 'n/a';
     return `${(ns / 1_000_000_000).toFixed(3)} s`;
   }
+
+  function formatDurationMs(totalMs) {
+    if (!Number.isFinite(totalMs)) return 'n/a';
+    const ms = Math.max(0, Math.floor(totalMs));
+    if (ms < 1_500) return 'just now';
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (min < 60) return s === 0 ? `${min}m` : `${min}m ${s}s`;
+    const hr = Math.floor(min / 60);
+    const m = min % 60;
+    if (hr < 24) return m === 0 ? `${hr}h` : `${hr}h ${m}m`;
+    const day = Math.floor(hr / 24);
+    const h = hr % 24;
+    return h === 0 ? `${day}d` : `${day}d ${h}h`;
+  }
+
+  function formatElapsedSince(ns) {
+    const n = Number(ns);
+    if (!Number.isFinite(n)) return 'n/a';
+    const elapsedMs = Math.max(0, (estimatedNowNs - n) / 1_000_000);
+    return `${formatDurationMs(elapsedMs)} ago`;
+  }
+
+  function statusIcon(status) {
+    if (status === 'done') return '✓';
+    if (status === 'cancelled') return '⨯';
+    return '●';
+  }
+
+  function statusLabel(status) {
+    if (status === 'done') return 'Done';
+    if (status === 'cancelled') return 'Cancelled';
+    return 'Running';
+  }
+
+  function rowBackground(status) {
+    if (status === 'done') return 'rgba(40, 167, 69, 0.10)';
+    if (status === 'cancelled') return 'rgba(220, 53, 69, 0.11)';
+    return 'transparent';
+  }
+
+  function isClosedStatus(status) {
+    return status === 'done' || status === 'cancelled';
+  }
+
+  function getRemainingMs(entry) {
+    if (!isClosedStatus(String(entry.status ?? ''))) return null;
+    if (entry.closedAtNs === null || entry.closedAtNs === undefined) return null;
+    const closedAtNs = Number(entry.closedAtNs);
+    if (!Number.isFinite(closedAtNs)) return null;
+    const elapsedMs = Math.max(0, (estimatedNowNs - closedAtNs) / 1_000_000);
+    return Math.max(0, RETAIN_DONE_MS - elapsedMs);
+  }
+
+  function renderExpiry(entry) {
+    const remainingMs = getRemainingMs(entry);
+    if (remainingMs === null) return null;
+    const ratio = Math.max(0, Math.min(1, remainingMs / RETAIN_DONE_MS));
+    const sweepDeg = `${(ratio * 360).toFixed(1)}deg`;
+    return e('div', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem' } }, [
+      e('span', {
+        key: 'ring',
+        title: `${Math.ceil(remainingMs / 1000)}s until auto-remove`,
+        style: {
+          width: '1rem',
+          height: '1rem',
+          borderRadius: '50%',
+          border: '1px solid rgba(127,127,127,0.35)',
+          display: 'inline-grid',
+          placeItems: 'center',
+          background: `conic-gradient(var(--vscode-progressBar-background, #0e70c0) ${sweepDeg}, rgba(127,127,127,0.28) ${sweepDeg})`
+        }
+      }, e('span', {
+        style: {
+          width: '0.45rem',
+          height: '0.45rem',
+          borderRadius: '50%',
+          background: 'var(--vscode-editor-background)'
+        }
+      })),
+      e('span', { key: 'txt', style: { fontFamily: 'monospace', fontSize: '0.75rem', opacity: 0.85 } }, `${Math.ceil(remainingMs / 1000)}s`)
+    ]);
+  }
+
+  function renderValue(entry) {
+    const description = String(entry.description ?? '');
+    const label = String(entry.label ?? '');
+    const doneRaw = Number(entry.stepsDone);
+    const done = Number.isFinite(doneRaw) ? Math.max(0, Math.floor(doneRaw)) : 0;
+    const totalRaw = Number(entry.totalSteps);
+    const hasTotal = Number.isFinite(totalRaw) && totalRaw > 0;
+    const total = hasTotal ? Math.floor(totalRaw) : 0;
+    const doneClamped = hasTotal ? Math.min(done, total) : done;
+    const ratio = hasTotal ? Math.max(0, Math.min(1, doneClamped / total)) : null;
+    const stepText = hasTotal
+      ? `${doneClamped} / ${total}`
+      : `${done} step${done === 1 ? '' : 's'}`;
+    const nodes = [];
+    if (description.length > 0) {
+      nodes.push(e('div', { key: 'desc', style: { fontWeight: 600 } }, description));
+    }
+    if (label.length > 0) {
+      nodes.push(e('div', { key: 'label', style: { opacity: 0.9 } }, label));
+    }
+    if (hasTotal) {
+      nodes.push(e('div', { key: 'bar-wrap', style: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem' } }, [
+        e('span', {
+          key: 'bar-outer',
+          style: {
+            width: '8rem',
+            height: '0.38rem',
+            borderRadius: '999px',
+            background: 'rgba(127,127,127,0.24)',
+            overflow: 'hidden',
+            display: 'inline-block'
+          }
+        }, e('span', {
+          style: {
+            display: 'block',
+            height: '100%',
+            width: `${(ratio * 100).toFixed(1)}%`,
+            background: 'var(--vscode-progressBar-background, #0e70c0)'
+          }
+        })),
+        e('span', { key: 'step', style: { fontFamily: 'monospace', fontSize: '0.75rem', opacity: 0.8 } }, stepText)
+      ]));
+    } else {
+      nodes.push(e('span', { key: 'step', style: { fontFamily: 'monospace', fontSize: '0.75rem', opacity: 0.8 } }, stepText));
+    }
+    return e('div', { style: { display: 'grid', gap: '0.15rem' } }, nodes);
+  }
+
+  const deleteEntry = React.useCallback(async (id) => {
+    if (!Number.isFinite(id)) return;
+    if (pendingDeleteIds.current.has(id)) return;
+    pendingDeleteIds.current.add(id);
+    try {
+      await rpc.call('DevWidgets.PTracker.deleteProgressRefRpc', { id });
+      setEntries((prev) => prev.filter((entry) => Number(entry.id) !== id));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      pendingDeleteIds.current.delete(id);
+    }
+  }, [rpc]);
 
   async function refreshNow(origin = 'manual') {
     if (inFlight.current) return;
@@ -126,8 +225,14 @@ export default function IoRefWidget() {
     if (origin === 'manual') setManualLoading(true);
     setError(null);
     try {
-      const next = await rpc.call('DevWidgets.IorefWidget.readCounterRpc', {});
-      setEntries(Array.isArray(next) ? next : []);
+      const next = await rpc.call('DevWidgets.PTracker.readProgressViewRpc', {});
+      const nextEntries = Array.isArray(next?.entries) ? next.entries : [];
+      setEntries(nextEntries);
+      const nowNs = Number(next?.nowNs);
+      if (Number.isFinite(nowNs)) {
+        setServerNowNs(nowNs);
+        setServerNowAtMs(Date.now());
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -144,18 +249,41 @@ export default function IoRefWidget() {
     return () => clearInterval(id);
   }, [autoEnabled, periodMs]);
 
-  return e('div', { style: { display: 'grid', gap: '0.5rem' } }, [
-    e('div', { key: 'controls', style: { display: 'grid', gap: '0.35rem' } }, [
-      e('label', { key: 'enabled' }, [
+  React.useEffect(() => {
+    void refreshNow('auto');
+  }, []);
+
+  React.useEffect(() => {
+    for (const entry of entries) {
+      const id = Number(entry.id);
+      const remainingMs = getRemainingMs(entry);
+      if (Number.isFinite(id) && remainingMs !== null && remainingMs <= 0) {
+        void deleteEntry(id);
+      }
+    }
+  }, [entries, estimatedNowNs, deleteEntry]);
+
+  return e('div', { style: { display: 'grid', gap: '0.35rem' } }, [
+    e('div', {
+      key: 'controls',
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.55rem',
+        flexWrap: 'wrap',
+        fontSize: '0.85rem'
+      }
+    }, [
+      e('label', { key: 'enabled', style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem' } }, [
         e('input', {
           type: 'checkbox',
           checked: autoEnabled,
           onChange: (ev) => setAutoEnabled(Boolean(ev.target.checked))
         }),
-        ' Auto refresh enabled'
+        'Auto'
       ]),
-      e('label', { key: 'period' }, [
-        'Period (ms): ',
+      e('label', { key: 'period', style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem' } }, [
+        'Every',
         e('input', {
           type: 'number',
           min: 100,
@@ -165,34 +293,83 @@ export default function IoRefWidget() {
             const n = Number(ev.target.value);
             if (Number.isFinite(n)) setPeriodMs(Math.max(100, Math.floor(n)));
           },
-          disabled: !autoEnabled
-        })
-      ])
+          disabled: !autoEnabled,
+          style: { width: '4.7rem', padding: '0 0.2rem', lineHeight: '1.2rem' }
+        }),
+        'ms'
+      ]),
+      e('button', {
+        key: 'btn',
+        onClick: () => void refreshNow('manual'),
+        disabled: manualLoading,
+        style: { padding: '0 0.4rem', lineHeight: '1.2rem' }
+      }, manualLoading ? 'Refreshing...' : 'Refresh')
     ]),
-    e('button', { key: 'btn', onClick: () => void refreshNow('manual'), disabled: manualLoading }, manualLoading ? 'Refreshing...' : 'Refresh now'),
-    e('div', { key: 'rows', style: { display: 'grid', gap: '0.35rem' } }, [
+    e('div', { key: 'rows', style: { display: 'grid', gap: '0.3rem' } }, [
       entries.length === 0
         ? e('em', { key: 'empty' }, 'No tracked progress refs.')
         : e('table', { key: 'table', style: { borderCollapse: 'collapse', width: '100%' } }, [
             e('thead', { key: 'thead' }, e('tr', {}, [
               e('th', { key: 'h-id', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Ref'),
+              e('th', { key: 'h-st', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'St'),
               e('th', { key: 'h-value', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Value'),
-              e('th', { key: 'h-created', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Created (mono)'),
-              e('th', { key: 'h-updated', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Last updated (mono)')
+              e('th', { key: 'h-created', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Age'),
+              e('th', { key: 'h-updated', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Updated'),
+              e('th', { key: 'h-actions', style: { textAlign: 'right', padding: '0.2rem 0 0.2rem 0' } }, 'Actions')
             ])),
-            e('tbody', { key: 'tbody' }, entries.map((entry) =>
-              e('tr', { key: String(entry.id) }, [
+            e('tbody', { key: 'tbody' }, entries.map((entry) => {
+              const status = String(entry.status ?? 'running');
+              const isClosed = isClosedStatus(status);
+              const idNum = Number(entry.id);
+              const deleting = pendingDeleteIds.current.has(idNum);
+              const createdNs = Number(entry.createdAtNs);
+              const updatedNs = Number(entry.lastUpdatedAtNs);
+              return e('tr', {
+                key: String(entry.id),
+                style: {
+                  opacity: isClosed ? 0.62 : 1,
+                  background: rowBackground(status)
+                }
+              }, [
                 e('td', { key: 'id', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, `#${entry.id}`),
-                e('td', { key: 'value', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, String(entry.value ?? '')),
-                e('td', { key: 'created', style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' } }, formatMonoSeconds(Number(entry.createdAtNs))),
-                e('td', { key: 'updated', style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' } }, formatMonoSeconds(Number(entry.lastUpdatedAtNs)))
-              ])
-            ))
+                e('td', { key: 'status', style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' }, title: statusLabel(status) }, statusIcon(status)),
+                e('td', { key: 'value', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, renderValue(entry)),
+                e('td', {
+                  key: 'created',
+                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
+                  title: `created @ ${formatMonoSeconds(createdNs)}`
+                }, formatElapsedSince(createdNs)),
+                e('td', {
+                  key: 'updated',
+                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
+                  title: `updated @ ${formatMonoSeconds(updatedNs)}`
+                }, formatElapsedSince(updatedNs)),
+                e('td', {
+                  key: 'actions',
+                  style: {
+                    padding: '0.2rem 0 0.2rem 0',
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }
+                }, isClosed ? [
+                  renderExpiry(entry),
+                  e('button', {
+                    key: 'remove',
+                    title: 'Remove from view now',
+                    onClick: () => void deleteEntry(idNum),
+                    disabled: deleting,
+                    style: { padding: '0 0.35rem', lineHeight: '1.1rem' }
+                  }, deleting ? '...' : '×')
+                ] : null)
+              ]);
+            }))
           ])
     ]),
-    error ? e('pre', { key: 'err', style: { color: 'var(--vscode-errorForeground)' } }, error) : null
+    error ? e('pre', { key: 'err', style: { color: 'var(--vscode-errorForeground)', margin: 0 } }, error) : null
   ]);
 }
 "
 
-end DevWidgets.IorefWidget
+end DevWidgets.PTracker

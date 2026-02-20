@@ -5,4 +5,5 @@ Author: Emilio J. Gallego Arias
 -/
 
 -- This module serves as the root of the `DevWidgets.PTracker` library.
+import DevWidgets.PTracker.ProgressRef
 import DevWidgets.PTracker.Widget

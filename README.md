@@ -14,8 +14,36 @@ IR and LCNF if available, with folding.
 
 ## `DevWidgets.PTracker`
 
-When you need more granularity than incremental snapshot reporting,
-your elaboration routine can use this widget to display progress.
+This widget allows tactics and commands to report progress in a more
+fine-grained way than increment snapshot reporting.
+
+The main API this Widget provides is a `ProgressRef` resource bracket:
+
+```lean
+def withProgressRef [Monad m] [MonadLiftT IO m] [MonadFinally m]
+    (totalSteps? : Option Nat)
+    (description : String)
+    (initialLabel : String := "")
+    (act : ProgressRef → m α) : m α := do
+```
+
+This ensures that `act` will properly release the `ProgressRef` on cancellation or error.
+
+Clients can report progress with:
+
+```lean
+def ProgressRef.update
+    (ref : ProgressRef)
+    (stepsDone : Nat)
+    (label? : Option String := none) : IO Unit
+```
+
+Enable the Widget with `show_panel_widgets [progressWidget]`.
+
+See the [example](./examples/PTracker.lean) for more information.
+
+Tip: Use `Lean.Core.checkInterrupted` in your elaboration code to
+check for interruption requests at safe points.
 
 ## `DevWidgets.InfoTreeExplorer`
 
