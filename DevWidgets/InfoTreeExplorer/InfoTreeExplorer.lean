@@ -781,15 +781,7 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
           };
         }
         const params = { pos: props.pos, 'uri?': props?.pos?.uri ?? null };
-        let lastError;
-        for (const method of ['infoTreeAtPos', 'DevWidgets.InfoTreeExplorer.infoTreeAtPos']) {
-          try {
-            return await rs.call(method, params);
-          } catch (err) {
-            lastError = err;
-          }
-        }
-        throw lastError;
+        return await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params);
       }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character]);
 
       const payload =
