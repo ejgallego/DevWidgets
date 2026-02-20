@@ -3,6 +3,8 @@
 Interactive Lean infoview widgets for compiler output, progress tracking,
 info trees, and docstring inspection.
 
+Current development target: `leanprover/lean4-nightly` (from `lean-toolchain`).
+
 ## Widgets
 
 - `DevWidgets.CE`: Compiler Explorer panel for IR/LCNF inspection.
@@ -89,6 +91,8 @@ Example files: `examples/InfoViewExplorer.lean`, `examples/InfoTreeFocused.lean`
 
 Docstring inspector panel for the declaration or identifier under cursor.
 
+This is currently a draft/demo widget and API surface may change.
+
 - Resolves declaration docstrings using elaborated context + syntax fallbacks.
 - Renders both Markdown and Verso docstrings.
 - Provides raw doc-comment preview when elaborated docs are unavailable.
@@ -113,5 +117,5 @@ lake env lean tests/DocString/Resolver.lean
 lake env lean tests/DocString/VersoLean.lean
 ```
 
-CI (`.github/workflows/lean_action_ci.yml`) runs these checks on both
-`nightly` (repo toolchain) and `stable`.
+CI (`.github/workflows/lean_action_ci.yml`) runs these checks on
+the repo nightly toolchain.
