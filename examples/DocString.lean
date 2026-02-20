@@ -1,7 +1,6 @@
-import DevWidgets.DocString
 import Lean
 import Lean.DocString.Syntax
-import DevWidgets.InfoTreeExplorer
+import DevWidgets.DocString
 
 /-!
 # DocString Example
@@ -153,7 +152,7 @@ def aaaa := 3
 -/
 def versoPipeline (n : Nat) : Nat :=
   2 * versoSucc n + mdSum [n, 1]
- 
+
 /--
 # Verso record with narrative docs
 

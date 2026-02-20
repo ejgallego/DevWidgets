@@ -3,6 +3,9 @@ import Lean
 
 open Lean
 
+-- for more interesting trees in docstrings
+-- set_option doc.verso true
+
 /-!
 # Focused Details Demo
 
