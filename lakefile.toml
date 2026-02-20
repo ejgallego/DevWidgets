@@ -5,7 +5,7 @@ testDriver = "Tests"
 
 [[lean_lib]]
 name = "DevWidgets"
-roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.Lib"]
+roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DocString", "DevWidgets.Lib"]
 
 [[lean_lib]]
 name = "Tests"
@@ -14,5 +14,8 @@ roots = [
   "tests.PTracker.RpcContracts",
   "tests.InfoTreeExplorer.AtPos",
   "tests.InfoTreeExplorer.RpcContracts",
-  "tests.Lib.Resource"
+  "tests.Lib.Resource",
+  "tests.Rpc.QualifiedMethodNames",
+  "tests.DocString.Resolver",
+  "tests.DocString.VersoLean"
 ]
