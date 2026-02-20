@@ -21,13 +21,8 @@ your elaboration routine can use this widget to display progress.
 
 An interactive complement to `set_option trace.Elab.Info`. It shows infoTree, snapsho
 
-## `DevWidgets.DHover`
-
-Reports information about the snapshot under hover.
-
 ## TODO:
 
 - Refactor Snapshot code into a lib for common consumption.
 - Common panel for all widgets
 - PTracker Report stats, histogram
-

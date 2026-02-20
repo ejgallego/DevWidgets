@@ -4,4 +4,4 @@ defaultTargets = ["DevWidgets"]
 
 [[lean_lib]]
 name = "DevWidgets"
-roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DHover"]
+roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.Lib", "DevWidgets.ShowDoc"]
