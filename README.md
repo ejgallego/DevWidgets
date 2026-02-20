@@ -6,6 +6,16 @@
 
 See the [examples](./examples).
 
+## Tests
+
+Run all tests with:
+
+```bash
+lake test
+```
+
+See [`tests/README.md`](./tests/README.md) for suite details.
+
 ## `DevWidgets.CE`
 
 Compiler Explorer Widget.

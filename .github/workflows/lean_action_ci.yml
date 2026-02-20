@@ -1,4 +1,4 @@
-name: DevWidgets Lean CI
+name: Lean CI
 
 on:
   push:
@@ -13,10 +13,20 @@ permissions:
   contents: read
 
 jobs:
-  devwidgets-build:
-    name: DevWidgets Build
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
       - uses: leanprover/lean-action@v1
+
+  tests:
+    name: Lake Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+      - name: Check test driver
+        run: lake check-test
+      - name: Run tests
+        run: lake test
