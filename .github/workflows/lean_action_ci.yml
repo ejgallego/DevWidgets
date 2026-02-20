@@ -1,4 +1,4 @@
-name: DevWidgets Lean CI
+name: Lean CI
 
 on:
   push:
@@ -13,10 +13,31 @@ permissions:
   contents: read
 
 jobs:
-  devwidgets-build:
-    name: DevWidgets Build
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
       - uses: leanprover/lean-action@v1
+
+  tests:
+    name: Tests (${{ matrix.suite.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: CE
+            file: tests/CE/RpcAndSchema.lean
+          - name: PTracker
+            file: tests/PTracker/RpcContracts.lean
+          - name: InfoTreeExplorer
+            file: tests/InfoTreeExplorer/RpcContracts.lean
+          - name: Lib
+            file: tests/Lib/Resource.lean
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+      - name: Run ${{ matrix.suite.name }} tests
+        run: lake env lean ${{ matrix.suite.file }}
