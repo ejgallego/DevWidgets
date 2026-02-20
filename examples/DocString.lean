@@ -1,17 +1,17 @@
-import DevWidgets.ShowDoc
+import DevWidgets.DocString
 import Lean
 import Lean.DocString.Syntax
 import DevWidgets.InfoTreeExplorer
 
 /-!
-# ShowDoc Example
+# DocString Example
 
 Move the cursor over documented identifiers in this file.
 This file intentionally mixes `doc.verso = false` and `doc.verso = true`
-to exercise both docstring modes in the `DevWidgets.ShowDoc` panel.
+to exercise both docstring modes in the `DevWidgets.DocString` panel.
 -/
 
-namespace ShowDocExample
+namespace DocStringExample
 
 set_option doc.verso false
 
@@ -195,7 +195,7 @@ theorem versoPipeline_zero : versoPipeline 0 = 3 := by
 def demoTree : MarkdownTree := .branch (.leaf 2) (.branch (.leaf 3) (.leaf 5))
 def demoExpr : VersoExpr := .add (.lit 2) (.add (.lit 10) (.lit 4))
 def demoCase : DocCaseStudy :=
-  { title := "Three-step pipeline", seed := 7, summary := "Used by ShowDoc example." }
+  { title := "Three-step pipeline", seed := 7, summary := "Used by DocString example." }
 
 /-- Demo expression evaluates to {lit}`16`. -/
 theorem evalVersoExpr_demo : evalVersoExpr demoExpr = 16 := by
@@ -218,4 +218,4 @@ theorem evalVersoExpr_demo : evalVersoExpr demoExpr = 16 := by
 #eval versoPipeline 5
 #eval evalVersoExpr demoExpr
 
-end ShowDocExample
+end DocStringExample

@@ -37,7 +37,7 @@ jobs:
         run: lake build
       - name: Run RPC regression tests
         run: lake env lean tests/Rpc/QualifiedMethodNames.lean
-      - name: Run ShowDoc resolver tests
-        run: lake env lean tests/ShowDoc/Resolver.lean
-      - name: Run ShowDoc Verso rendering tests
-        run: lake env lean tests/ShowDoc/VersoLean.lean
+      - name: Run DocString resolver tests
+        run: lake env lean tests/DocString/Resolver.lean
+      - name: Run DocString Verso rendering tests
+        run: lake env lean tests/DocString/VersoLean.lean

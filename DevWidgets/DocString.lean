@@ -14,7 +14,7 @@ public import Lean.Elab.DocString.Builtin
 meta import Lean.Widget.Commands
 public section
 
-namespace DevWidgets.ShowDoc
+namespace DevWidgets.DocString
 
 open Lean Widget Elab
 
@@ -195,23 +195,23 @@ namespace Testing
 
 /-- Testing hook: find a declaration id around a cursor position. -/
 def declIdAtPos? (stx : Syntax) (pos : String.Pos.Raw) : Option Name :=
-  DevWidgets.ShowDoc.declIdAtPos? stx pos
+  DevWidgets.DocString.declIdAtPos? stx pos
 
 /-- Testing hook: detect whether a cursor position is inside a doc comment. -/
 def isInDocComment (stx : Syntax) (pos : String.Pos.Raw) : Bool :=
-  (DevWidgets.ShowDoc.docCommentAtPos? stx pos).isSome
+  (DevWidgets.DocString.docCommentAtPos? stx pos).isSome
 
 /-- Testing hook: detect whether a cursor/nearby position is inside a doc comment. -/
 def isInDocCommentNear (stx : Syntax) (pos : String.Pos.Raw) : Bool :=
-  (DevWidgets.ShowDoc.docCommentAtOrNearPos? stx pos).isSome
+  (DevWidgets.DocString.docCommentAtOrNearPos? stx pos).isSome
 
 /-- Testing hook: declaration candidate ordering/dedup used by the resolver. -/
 def declarationCandidates (currNs : Name) (fromCtx? fromStx? : Option Name) : List Name :=
-  DevWidgets.ShowDoc.declarationNameCandidates currNs fromCtx? fromStx?
+  DevWidgets.DocString.declarationNameCandidates currNs fromCtx? fromStx?
 
 /-- Testing hook: identifier candidate ordering/dedup used by the resolver. -/
 def identifierCandidates (fromInfo? ident? : Option Name) : List Name :=
-  DevWidgets.ShowDoc.identifierNameCandidates fromInfo? ident?
+  DevWidgets.DocString.identifierNameCandidates fromInfo? ident?
 
 end Testing
 
@@ -361,7 +361,7 @@ mutual
     String.join <| parts.toList.map (renderPartHtml depth)
 end
 
-/-- Render a Verso docstring to HTML for the ShowDoc widget. -/
+/-- Render a Verso docstring to HTML for the DocString widget. -/
 def renderVersoDocHtml (doc : VersoDocString) : String :=
   s!"<div class=\"verso-doc\">{renderBlocksHtml doc.text}{renderPartsHtml 1 doc.subsections}</div>"
 
@@ -485,7 +485,7 @@ function loadMarkedFromCdn() {
     return Promise.resolve(window.marked)
   }
   return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-showdoc-marked="1"]')
+    const existing = document.querySelector('script[data-docstring-marked="1"]')
     if (existing) {
       existing.addEventListener('load', () => resolve(window.marked || null), { once: true })
       existing.addEventListener('error', () => reject(new Error('Failed to load marked.js')), { once: true })
@@ -494,7 +494,7 @@ function loadMarkedFromCdn() {
     const script = document.createElement('script')
     script.src = MARKED_CDN
     script.async = true
-    script.dataset.showdocMarked = '1'
+    script.dataset.docstringMarked = '1'
     script.onload = () => resolve(window.marked || null)
     script.onerror = () => reject(new Error('Failed to load marked.js'))
     document.head.appendChild(script)
@@ -505,7 +505,7 @@ function fallbackMarkdownHtml(rawDoc) {
   return `<pre><code>${escapeHtml(rawDoc)}</code></pre>`
 }
 
-export default function ShowDocWidget(props) {
+export default function DocStringWidget(props) {
   const rs = useRpcSession()
   const current = fmtPos(props?.pos)
   const [markedApi, setMarkedApi] = React.useState(null)
@@ -525,7 +525,7 @@ export default function ShowDocWidget(props) {
   const docState = useAsync(async () => {
     if (!props?.pos) return undefined
     const params = { pos: props.pos }
-    return await rs.call('DevWidgets.ShowDoc.docAtPos', params)
+    return await rs.call('DevWidgets.DocString.docAtPos', params)
   }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character])
 
   const c = {
@@ -585,7 +585,7 @@ export default function ShowDocWidget(props) {
         justifyContent: 'space-between'
       }
     },
-    React.createElement('div', { style: { fontWeight: 700, letterSpacing: '0.02em', color: c.fg } }, 'Show Doc'),
+    React.createElement('div', { style: { fontWeight: 700, letterSpacing: '0.02em', color: c.fg } }, 'DocString'),
     React.createElement('div', { style: { fontSize: '0.82em', color: c.muted } }, 'Rendered HTML')
   )
 
@@ -623,7 +623,7 @@ export default function ShowDocWidget(props) {
             fontSize: '12px',
             lineHeight: '1.45'
           },
-          className: 'showdoc-rendered',
+          className: 'docstring-rendered',
           dangerouslySetInnerHTML: { __html: renderedHtml }
         },
         null
@@ -664,24 +664,24 @@ export default function ShowDocWidget(props) {
       'style',
       null,
       `
-      .showdoc-rendered p { margin: 0.35rem 0; }
-      .showdoc-rendered ul, .showdoc-rendered ol { margin: 0.35rem 0 0.35rem 1.25rem; padding: 0; }
-      .showdoc-rendered li { margin: 0.15rem 0; }
-      .showdoc-rendered h1, .showdoc-rendered h2, .showdoc-rendered h3,
-      .showdoc-rendered h4, .showdoc-rendered h5, .showdoc-rendered h6 {
+      .docstring-rendered p { margin: 0.35rem 0; }
+      .docstring-rendered ul, .docstring-rendered ol { margin: 0.35rem 0 0.35rem 1.25rem; padding: 0; }
+      .docstring-rendered li { margin: 0.15rem 0; }
+      .docstring-rendered h1, .docstring-rendered h2, .docstring-rendered h3,
+      .docstring-rendered h4, .docstring-rendered h5, .docstring-rendered h6 {
         margin: 0.45rem 0 0.2rem 0;
         line-height: 1.25;
       }
-      .showdoc-rendered code {
+      .docstring-rendered code {
         font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
         background: rgba(255,255,255,0.06);
         border-radius: 4px;
         padding: 0.02rem 0.24rem;
       }
-      .showdoc-rendered .lean-ref {
+      .docstring-rendered .lean-ref {
         border: 1px solid rgba(255,255,255,0.08);
       }
-      .showdoc-rendered pre {
+      .docstring-rendered pre {
         margin: 0.4rem 0;
         padding: 0.45rem 0.55rem;
         background: rgba(0,0,0,0.18);
@@ -689,45 +689,45 @@ export default function ShowDocWidget(props) {
         border-radius: 6px;
         overflow: auto;
       }
-      .showdoc-rendered pre code { background: transparent; padding: 0; }
-      .showdoc-rendered .lean-code {
+      .docstring-rendered pre code { background: transparent; padding: 0; }
+      .docstring-rendered .lean-code {
         background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.18));
       }
-      .showdoc-rendered .lean-token {
+      .docstring-rendered .lean-token {
         border-radius: 3px;
       }
-      .showdoc-rendered .lean-kw {
+      .docstring-rendered .lean-kw {
         color: var(--vscode-symbolIcon-keywordForeground, #c586c0);
       }
-      .showdoc-rendered .lean-const {
+      .docstring-rendered .lean-const {
         color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
       }
-      .showdoc-rendered .lean-var {
+      .docstring-rendered .lean-var {
         color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
       }
-      .showdoc-rendered .lean-field {
+      .docstring-rendered .lean-field {
         color: var(--vscode-symbolIcon-propertyForeground, #4fc1ff);
       }
-      .showdoc-rendered .lean-option {
+      .docstring-rendered .lean-option {
         color: var(--vscode-symbolIcon-constantForeground, #d19a66);
       }
-      .showdoc-rendered .lean-lit {
+      .docstring-rendered .lean-lit {
         color: var(--vscode-editorInfo-foreground, #ce9178);
       }
-      .showdoc-rendered .lean-tactic {
+      .docstring-rendered .lean-tactic {
         color: var(--vscode-symbolIcon-methodForeground, #b5cea8);
       }
-      .showdoc-rendered .lean-term {
+      .docstring-rendered .lean-term {
         color: var(--vscode-editor-foreground, #d4d4d4);
       }
-      .showdoc-rendered .lean-syntax {
+      .docstring-rendered .lean-syntax {
         color: var(--vscode-symbolIcon-classForeground, #4ec9b0);
       }
-      .showdoc-rendered .lean-module {
+      .docstring-rendered .lean-module {
         color: var(--vscode-symbolIcon-moduleForeground, #d7ba7d);
       }
-      .showdoc-rendered a { color: var(--vscode-textLink-foreground, #3794ff); }
-      .showdoc-rendered blockquote {
+      .docstring-rendered a { color: var(--vscode-textLink-foreground, #3794ff); }
+      .docstring-rendered blockquote {
         margin: 0.4rem 0;
         padding: 0.15rem 0.55rem;
         border-left: 3px solid ${c.border};
@@ -742,10 +742,10 @@ export default function ShowDocWidget(props) {
 "#
 
 @[widget_module]
-abbrev showDocWidget : Widget.Module where
+abbrev docStringWidget : Widget.Module where
   javascript := widgetJs
 
-end DevWidgets.ShowDoc
+end DevWidgets.DocString
 
-open DevWidgets.ShowDoc in
-show_panel_widgets [showDocWidget]
+open DevWidgets.DocString in
+show_panel_widgets [docStringWidget]

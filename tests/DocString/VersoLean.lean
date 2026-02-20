@@ -1,11 +1,11 @@
-import DevWidgets.ShowDoc
+import DevWidgets.DocString
 import Lean
 
 open Lean
 
 set_option doc.verso true
 
-namespace DevWidgets.Tests.ShowDoc.VersoLean
+namespace DevWidgets.Tests.DocString.VersoLean
 
 /--
 Inline Lean role and Lean code block, intended to validate semantic rendering.
@@ -34,7 +34,7 @@ private partial def hasAnonymousHygieneInfo (stx : Syntax) : Bool :=
   | _ => false
 
 private def parseSingleCommand (src : String) : CoreM Syntax := do
-  let ictx := Parser.mkInputContext src "<showdoc-test>"
+  let ictx := Parser.mkInputContext src "<docstring-test>"
   let env ← getEnv
   let cmdState : Elab.Command.State := {
     env
@@ -63,7 +63,7 @@ Regression test:
     | throwError "no internal docstring found for `sampleDecl`"
   let .inr verso := internal
     | throwError "expected a Verso docstring for `sampleDecl`"
-  let html := DevWidgets.ShowDoc.renderVersoDocHtml verso
+  let html := DevWidgets.DocString.renderVersoDocHtml verso
   assertContains "Verso HTML" html "lean-code"
   assertContains "Verso HTML" html "lean-token"
   assertContains "Verso HTML" html "lean-ref lean-term"
@@ -90,7 +90,7 @@ Regression test:
     | throwError "no internal docstring found for `sampleEvalDecl`"
   let .inr verso := internal
     | throwError "expected a Verso docstring for `sampleEvalDecl`"
-  let html := DevWidgets.ShowDoc.renderVersoDocHtml verso
+  let html := DevWidgets.DocString.renderVersoDocHtml verso
   assertContains "Verso #eval HTML" html "lean-code"
   assertContains "Verso #eval HTML" html "#eval"
   assertContains "Verso #eval HTML" html "Nat.succ"
@@ -160,4 +160,4 @@ def versoPipeline (n : Nat) : Nat :=
   2 * n + mdSum [n, 1]
 
 
-end DevWidgets.Tests.ShowDoc.VersoLean
+end DevWidgets.Tests.DocString.VersoLean

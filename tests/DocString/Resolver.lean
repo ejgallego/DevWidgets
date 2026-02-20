@@ -1,12 +1,12 @@
-import DevWidgets.ShowDoc
+import DevWidgets.DocString
 import Lean
 
 open Lean
 
-namespace DevWidgets.Tests.ShowDoc.Resolver
+namespace DevWidgets.Tests.DocString.Resolver
 
 private def parseSingleCommand (src : String) : CoreM Syntax := do
-  let ictx := Parser.mkInputContext src "<showdoc-resolver-test>"
+  let ictx := Parser.mkInputContext src "<docstring-resolver-test>"
   let env ← getEnv
   let cmdState : Elab.Command.State := {
     env
@@ -62,18 +62,18 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
     | throwError "docComment should have a canonical range"
 
   let posInDoc := docRange.start + 'x'
-  unless DevWidgets.ShowDoc.Testing.isInDocComment cmd posInDoc do
+  unless DevWidgets.DocString.Testing.isInDocComment cmd posInDoc do
     throwError "expected cursor inside doc comment to be detected"
 
-  let declInDoc := DevWidgets.ShowDoc.Testing.declIdAtPos? cmd posInDoc
+  let declInDoc := DevWidgets.DocString.Testing.declIdAtPos? cmd posInDoc
   unless declInDoc == some `sampleDecl do
     throwError m!"expected declId at doc-comment cursor to be `sampleDecl`, got {declInDoc}"
 
   let posAfterDoc := docRange.stop + ' '
-  if DevWidgets.ShowDoc.Testing.isInDocComment cmd posAfterDoc then
+  if DevWidgets.DocString.Testing.isInDocComment cmd posAfterDoc then
     throwError "expected cursor after doc comment stop to be outside doc comment"
 
-  let declAfterDoc := DevWidgets.ShowDoc.Testing.declIdAtPos? cmd posAfterDoc
+  let declAfterDoc := DevWidgets.DocString.Testing.declIdAtPos? cmd posAfterDoc
   unless declAfterDoc == some `sampleDecl do
     throwError m!"expected declId after doc-comment to still be `sampleDecl`, got {declAfterDoc}"
 
@@ -86,12 +86,12 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
     | throwError "docComment should have a canonical range"
   -- Position on the empty line between `line one` and `line three`.
   let posOnBlankLine := docRange.start + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x'
-  unless DevWidgets.ShowDoc.Testing.isInDocComment cmd posOnBlankLine do
+  unless DevWidgets.DocString.Testing.isInDocComment cmd posOnBlankLine do
     throwError "expected blank-line cursor inside doc comment to be detected"
   let posAtBlankLineStart := docRange.start + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x' + 'x'
-  unless DevWidgets.ShowDoc.Testing.isInDocComment cmd posAtBlankLineStart do
+  unless DevWidgets.DocString.Testing.isInDocComment cmd posAtBlankLineStart do
     throwError "expected blank-line-start cursor inside doc comment to be detected"
-  unless DevWidgets.ShowDoc.Testing.isInDocCommentNear cmd posAtBlankLineStart do
+  unless DevWidgets.DocString.Testing.isInDocCommentNear cmd posAtBlankLineStart do
     throwError "expected near-doc-comment detection on blank-line start"
 
 #eval show CoreM Unit from do
@@ -105,27 +105,27 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
   let some rhsRange := rhsAtom.getRange? (canonicalOnly := true)
     | throwError "rhs literal atom should have a canonical range"
   let posInBody := rhsRange.start + 'x'
-  let declInBody := DevWidgets.ShowDoc.Testing.declIdAtPos? cmd posInBody
+  let declInBody := DevWidgets.DocString.Testing.declIdAtPos? cmd posInBody
   unless declInBody == some `bodyLookup do
     throwError m!"expected declId in declaration body to be `bodyLookup`, got {declInBody}"
 
 #eval show CoreM Unit from do
-  let c1 := DevWidgets.ShowDoc.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `sampleDecl)
+  let c1 := DevWidgets.DocString.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `sampleDecl)
   assertEqNames "candidate ordering: ctx + stx" [`Demo.sampleDecl, `sampleDecl] c1
 
-  let c2 := DevWidgets.ShowDoc.Testing.declarationCandidates `Demo none (some `sampleDecl)
+  let c2 := DevWidgets.DocString.Testing.declarationCandidates `Demo none (some `sampleDecl)
   assertEqNames "candidate ordering: stx + namespaced" [`sampleDecl, `Demo.sampleDecl] c2
 
-  let c3 := DevWidgets.ShowDoc.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `Demo.sampleDecl)
+  let c3 := DevWidgets.DocString.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `Demo.sampleDecl)
   assertEqNames "candidate dedup" [`Demo.sampleDecl] c3
 
-  let i1 := DevWidgets.ShowDoc.Testing.identifierCandidates (some `Demo.sampleDecl) (some `sampleDecl)
+  let i1 := DevWidgets.DocString.Testing.identifierCandidates (some `Demo.sampleDecl) (some `sampleDecl)
   assertEqNames "identifier ordering: info + ident" [`Demo.sampleDecl, `sampleDecl] i1
 
-  let i2 := DevWidgets.ShowDoc.Testing.identifierCandidates none (some `sampleDecl)
+  let i2 := DevWidgets.DocString.Testing.identifierCandidates none (some `sampleDecl)
   assertEqNames "identifier ordering: only ident" [`sampleDecl] i2
 
-  let i3 := DevWidgets.ShowDoc.Testing.identifierCandidates (some `sampleDecl) (some `sampleDecl)
+  let i3 := DevWidgets.DocString.Testing.identifierCandidates (some `sampleDecl) (some `sampleDecl)
   assertEqNames "identifier dedup" [`sampleDecl] i3
 
-end DevWidgets.Tests.ShowDoc.Resolver
+end DevWidgets.Tests.DocString.Resolver
