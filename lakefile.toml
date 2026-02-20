@@ -1,7 +1,18 @@
 name = "dev-widgets"
 version = "0.0.1"
 defaultTargets = ["DevWidgets"]
+testDriver = "Tests"
 
 [[lean_lib]]
 name = "DevWidgets"
 roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.Lib"]
+
+[[lean_lib]]
+name = "Tests"
+roots = [
+  "tests.CE.RpcAndSchema",
+  "tests.PTracker.RpcContracts",
+  "tests.InfoTreeExplorer.AtPos",
+  "tests.InfoTreeExplorer.RpcContracts",
+  "tests.Lib.Resource"
+]
