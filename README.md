@@ -30,6 +30,16 @@ Then open any file from `examples/` in Lean/VSCode:
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
 
+## Tests
+
+Run all tests with:
+
+```bash
+lake test
+```
+
+See [`tests/README.md`](./tests/README.md) for suite details.
+
 ## `DevWidgets.CE`
 
 Compiler Explorer widget.

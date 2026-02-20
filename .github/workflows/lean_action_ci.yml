@@ -1,4 +1,4 @@
-name: DevWidgets Lean CI
+name: Lean CI
 
 on:
   push:
@@ -13,8 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  devwidgets-build:
-    name: DevWidgets Build (nightly)
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,9 +21,14 @@ jobs:
       - uses: leanprover/lean-action@v1
       - name: Build package
         run: lake build
-      - name: Run RPC regression tests
-        run: lake env lean tests/Rpc/QualifiedMethodNames.lean
-      - name: Run DocString resolver tests
-        run: lake env lean tests/DocString/Resolver.lean
-      - name: Run DocString Verso rendering tests
-        run: lake env lean tests/DocString/VersoLean.lean
+
+  tests:
+    name: Lake Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+      - name: Check test driver
+        run: lake check-test
+      - name: Run tests
+        run: lake test
