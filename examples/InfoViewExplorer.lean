@@ -3,9 +3,6 @@ import Lean
 
 open Lean
 
-open DevWidgets.InfoTreeExplorer
-#infotree_explorer
-
 /- Move the cursor around this file to explore diverse infotree nodes. -/
 
 namespace InfoViewExplorerDemo
