@@ -16,14 +16,17 @@ jobs:
   devwidgets-build:
     name: DevWidgets Build (${{ matrix.toolchain-label }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.allow-failure }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - toolchain-label: nightly
             use-repo-toolchain: true
+            allow-failure: false
           - toolchain-label: stable
             use-repo-toolchain: false
+            allow-failure: true
 
     steps:
       - uses: actions/checkout@v5

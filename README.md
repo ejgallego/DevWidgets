@@ -1,29 +1,55 @@
 # Lean Dev Widgets
 
-- **DevWidgets.CE**: Interactive IR and LCNF "Compiler Explorer" like widget.
-- **DevWidgets.PTracker**: A progress tracker widget that allows to display progress before elaboration has finished.
-- **DevWidgets.InfoTreeExplorer**: Interactive Syntax and InfoView Explorer
+Interactive Lean infoview widgets for compiler output, progress tracking,
+info trees, and docstring inspection.
 
-See the [examples](./examples).
+## Widgets
+
+- `DevWidgets.CE`: Compiler Explorer panel for IR/LCNF inspection.
+- `DevWidgets.PTracker`: progress tracker API and widget for long-running elaboration.
+- `DevWidgets.InfoTreeExplorer`: cursor-focused info tree explorer panel.
+- `DevWidgets.DocString`: cursor-focused docstring inspector with Markdown/Verso rendering.
+
+See runnable demos in `examples/`.
+
+## Quick Start
+
+Build the project:
+
+```bash
+lake build
+```
+
+Then open any file from `examples/` in Lean/VSCode:
+
+- `examples/CE.lean`
+- `examples/PTracker.lean`
+- `examples/InfoViewExplorer.lean`
+- `examples/InfoTreeFocused.lean`
+- `examples/DocString.lean`
 
 ## `DevWidgets.CE`
 
-Compiler Explorer Widget.
+Compiler Explorer widget.
 
-An interactive complement to `set_option trace.Compiler.*`. shows
-IR and LCNF if available, with folding and basic syntax highlighting.
+This is an interactive complement to `set_option trace.Compiler.*`:
 
-Includes client display options, and an advanced panel exposing
-Lean pretty-printer and compiler tuning options.
+- shows IR and LCNF (when available),
+- supports folding and syntax highlighting,
+- exposes pretty-printer/compiler tuning options,
+- can compile on-the-fly and diff outputs.
 
-The widget can also compile on-the-fly and diff code.
+Import:
+
+```lean
+import DevWidgets.CE
+```
 
 ## `DevWidgets.PTracker`
 
-This widget allows tactics and commands to report progress in a more
-fine-grained way than increment snapshot reporting.
+Fine-grained progress reporting for tactics/commands before elaboration is complete.
 
-The main API this Widget provides is a `ProgressRef` resource bracket:
+Main API:
 
 ```lean
 def withProgressRef [Monad m] [MonadLiftT IO m] [MonadFinally m]
@@ -33,9 +59,7 @@ def withProgressRef [Monad m] [MonadLiftT IO m] [MonadFinally m]
     (act : ProgressRef → m α) : m α := do
 ```
 
-This ensures that `act` will properly release the `ProgressRef` on cancellation or error.
-
-Clients can report progress with:
+Update progress:
 
 ```lean
 def ProgressRef.update
@@ -44,19 +68,50 @@ def ProgressRef.update
     (label? : Option String := none) : IO Unit
 ```
 
-Enable the Widget with `show_panel_widgets [progressWidget]`.
-
-See the [example](./examples/PTracker.lean) for more information.
-
-Tip: Use `Lean.Core.checkInterrupted` in your elaboration code to
-check for interruption requests at safe points.
+Tip: call `Lean.Core.checkInterrupted` at safe points in long loops.
 
 ## `DevWidgets.InfoTreeExplorer`
 
-An interactive complement to `set_option trace.Elab.Info`. It shows infoTree, snapsho
+Interactive explorer for elaboration info trees around the current cursor position.
 
-## TODO:
+- Uses cursor-position RPC (`DevWidgets.InfoTreeExplorer.infoTreeAtPos`).
+- Displays focused path information for easier local inspection.
 
-- Refactor Snapshot code into a lib for common consumption.
-- Common panel for all widgets
-- PTracker Report stats, histogram
+Import:
+
+```lean
+import DevWidgets.InfoTreeExplorer
+```
+
+Example files: `examples/InfoViewExplorer.lean`, `examples/InfoTreeFocused.lean`.
+
+## `DevWidgets.DocString`
+
+Docstring inspector panel for the declaration or identifier under cursor.
+
+- Resolves declaration docstrings using elaborated context + syntax fallbacks.
+- Renders both Markdown and Verso docstrings.
+- Provides raw doc-comment preview when elaborated docs are unavailable.
+- Uses fully-qualified RPC call `DevWidgets.DocString.docAtPos`.
+
+Import:
+
+```lean
+import DevWidgets.DocString
+```
+
+Example file: `examples/DocString.lean`.
+
+## Regression Tests
+
+Run all regression tests used by CI:
+
+```bash
+lake env lean tests/Rpc/QualifiedMethodNames.lean
+lake env lean tests/InfoTreeExplorer/AtPos.lean
+lake env lean tests/DocString/Resolver.lean
+lake env lean tests/DocString/VersoLean.lean
+```
+
+CI (`.github/workflows/lean_action_ci.yml`) runs these checks on both
+`nightly` (repo toolchain) and `stable`.
