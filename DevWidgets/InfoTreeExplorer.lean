@@ -5,10 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import DevWidgets.InfoTreeExplorer.InfoTreeExplorer
+import Lean.Widget.Commands
 
 open DevWidgets.InfoTreeExplorer in
--- show_panel_widgets [infoTreeExplorerWidget]
-
-#infotree_explorer
-
-def a := 3
+show_panel_widgets [infoTreeExplorerWidget]
