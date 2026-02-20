@@ -15,8 +15,9 @@ private def assertNotContains (label haystack needle : String) : CoreM Unit := d
 
 #eval show CoreM Unit from do
   let js := DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget.javascript
-  assertContains "InfoTreeExplorer widget JS" js "rs.call('DevWidgets.InfoTreeExplorer.fetchInfoTreeSummary', props)"
-  assertContains "InfoTreeExplorer widget JS" js "setInterval(refresh, 1000)"
-  assertNotContains "InfoTreeExplorer widget JS" js "rs.call('fetchInfoTreeSummary', props)"
+  assertContains "InfoTreeExplorer widget JS" js "for (const method of ['infoTreeAtPos', 'DevWidgets.InfoTreeExplorer.infoTreeAtPos'])"
+  assertContains "InfoTreeExplorer widget JS" js "await rs.call(method, params)"
+  assertContains "InfoTreeExplorer widget JS" js "props?.pos"
+  assertNotContains "InfoTreeExplorer widget JS" js "fetchInfoTreeSummary"
 
 end DevWidgets.Tests.InfoTreeExplorer.RpcContracts
