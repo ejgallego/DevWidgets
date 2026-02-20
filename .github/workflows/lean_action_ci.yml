@@ -14,9 +14,30 @@ permissions:
 
 jobs:
   devwidgets-build:
-    name: DevWidgets Build
+    name: DevWidgets Build (${{ matrix.toolchain-label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain-label: nightly
+            use-repo-toolchain: true
+          - toolchain-label: stable
+            use-repo-toolchain: false
 
     steps:
       - uses: actions/checkout@v5
       - uses: leanprover/lean-action@v1
+      - name: Select stable toolchain
+        if: ${{ !matrix.use-repo-toolchain }}
+        run: |
+          elan toolchain install stable
+          elan override set stable
+      - name: Build package
+        run: lake build
+      - name: Run RPC regression tests
+        run: lake env lean tests/Rpc/QualifiedMethodNames.lean
+      - name: Run ShowDoc resolver tests
+        run: lake env lean tests/ShowDoc/Resolver.lean
+      - name: Run ShowDoc Verso rendering tests
+        run: lake env lean tests/ShowDoc/VersoLean.lean
