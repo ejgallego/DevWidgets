@@ -1,5 +1,4 @@
 import DevWidgets.CE
-import DevWidgets.DHover
 
 /--
 Place the cursor on `cfgDemo`, `loopAcc`, or `matchDemo` below to inspect

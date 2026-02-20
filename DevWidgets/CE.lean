@@ -12,4 +12,4 @@ public section
 
 open DevWidgets.CE in
 -- Enable the CE widget globally for modules importing `DevWidgets.CE`.
-show_panel_widgets [clickPositionWidget]
+show_panel_widgets [compilerExplorerWidget]

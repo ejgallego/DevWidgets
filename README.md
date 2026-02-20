@@ -3,14 +3,20 @@
 - **DevWidgets.CE**: Interactive IR and LCNF "Compiler Explorer" like widget.
 - **DevWidgets.PTracker**: A progress tracker widget that allows to display progress before elaboration has finished.
 - **DevWidgets.InfoTreeExplorer**: Interactive Syntax and InfoView Explorer
-- **DevWidgets.DHover**: Displays internal Lean information on hover, like Snapshot status, etc...
 
-See some [examples](./examples).
+See the [examples](./examples).
 
 ## `DevWidgets.CE`
 
-An interactive complement to some `set_option trace.Compiler.*`, shows
-IR and LCNF if available, with folding.
+Compiler Explorer Widget.
+
+An interactive complement to `set_option trace.Compiler.*`. shows
+IR and LCNF if available, with folding and basic syntax highlighting.
+
+Includes client display options, and an advanced panel exposing
+Lean pretty-printer and compiler tuning options.
+
+The widget can also compile on-the-fly and diff code.
 
 ## `DevWidgets.PTracker`
 
