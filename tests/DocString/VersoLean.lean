@@ -82,7 +82,7 @@ def sampleEvalDecl : Nat := 4
 /-
 Regression test:
 - `#eval` lines inside Verso `lean` blocks should be rendered as code.
-- Parenthesized `#eval` currently contains parser hygiene metadata (`[anonymous]`).
+- Parenthesized `#eval` should not leak parser hygiene metadata.
 -/
 #eval show CoreM Unit from do
   let env ← getEnv
@@ -95,12 +95,14 @@ Regression test:
   assertContains "Verso #eval HTML" html "#eval"
   assertContains "Verso #eval HTML" html "Nat.succ"
   assertContains "Verso #eval HTML" html "String.length"
-  assertContains "Verso #eval HTML" html "[anonymous]"
+  if html.contains "[anonymous]" then
+    throwError m!"did not expect parser hygiene metadata in rendered HTML\n---\n{html}\n---"
 
 /- 
 Provenance test:
-- `#eval ( ... )` parses with an anonymous identifier in `hygieneInfo`.
-- `#eval` without parenthesized term does not have this artifact.
+- Parser provenance still contains anonymous hygiene metadata for parenthesized `#eval`.
+- Non-parenthesized `#eval` should avoid this artifact.
+- Rendering should strip/hide this metadata (checked above).
 -/
 #eval show CoreM Unit from do
   let withParens ← parseSingleCommand "#eval (1 + 2)\n"
