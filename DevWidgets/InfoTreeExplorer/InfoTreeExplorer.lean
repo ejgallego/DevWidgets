@@ -43,7 +43,6 @@ meta partial def rootSubtreeCount : Elab.InfoTree → Nat
   | .node _ children => children.size
   | .hole _ => 0
 
--- TODO Codex: Does Lean have an API for this
 meta def infoTag (info : Elab.Info) : String :=
   match info with
   | .ofTacticInfo _ => "tactic"
@@ -90,42 +89,17 @@ meta def formatRange (text : FileMap) (stx : Syntax) : String :=
     let lsp := text.utf8RangeToLspRange r
     s!"{lsp.start.line}:{lsp.start.character}..{lsp.end.line}:{lsp.end.character}"
 
--- TODO Codex: Does Lean have an API for this
-meta def completionStx : Elab.CompletionInfo → Syntax
-  | .dot termInfo _ => termInfo.stx
-  | .id stx .. => stx
-  | .dotId stx .. => stx
-  | .fieldId stx .. => stx
-  | .namespaceId stx => stx
-  | .option stx => stx
-  | .errorName stx _ => stx
-  | .endSection stx .. => stx
-  | .tactic stx => stx
-
--- TODO Codex: Does Lean have an API for this
 meta def infoStx? : Elab.Info → Option Syntax
-  | .ofTacticInfo i => some i.stx
-  | .ofTermInfo i => some i.stx
-  | .ofPartialTermInfo i => some i.stx
-  | .ofCommandInfo i => some i.stx
-  | .ofMacroExpansionInfo i => some i.stx
-  | .ofOptionInfo i => some i.stx
-  | .ofErrorNameInfo i => some i.stx
-  | .ofFieldInfo i => some i.stx
-  | .ofCompletionInfo i => some (completionStx i)
-  | .ofUserWidgetInfo i => some i.stx
-  | .ofCustomInfo i => some i.stx
   | .ofFVarAliasInfo _ => none
-  | .ofFieldRedeclInfo i => some i.stx
-  | .ofDelabTermInfo i => some i.stx
-  | .ofChoiceInfo i => some i.stx
-  | .ofDocInfo i => some i.stx
-  | .ofDocElabInfo i => some i.stx
+  | info => some info.stx
 
 meta def infoContainsPos (info : Elab.Info) (pos : String.Pos.Raw) : Bool :=
+  info.contains pos
+
+meta def infoKindAndRange (text : FileMap) (info : Elab.Info) : String × String :=
   match infoStx? info with
-  | some stx => stxContainsPos stx pos
-  | none => false
+  | some stx => (s!"{stx.getKind}", formatRange text stx)
+  | none => ("no-stx", "unknown")
 
 meta def partialCtxTag : Elab.PartialContextInfo → String
   | .commandCtx _ => "commandCtx"
@@ -134,14 +108,7 @@ meta def partialCtxTag : Elab.PartialContextInfo → String
 
 meta def infoNodeLabel (text : FileMap) (info : Elab.Info) : String :=
   let tag := infoTag info
-  let kind :=
-    match infoStx? info with
-    | some stx => s!"{stx.getKind}"
-    | none => "no-stx"
-  let range :=
-    match infoStx? info with
-    | some stx => formatRange text stx
-    | none => "unknown"
+  let (kind, range) := infoKindAndRange text info
   let elaborator :=
     match info.toElabInfo? with
     | some i => s!" elab={i.elaborator}"

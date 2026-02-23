@@ -21,5 +21,7 @@ lake check-test
 - `tests/InfoTreeExplorer/AtPos.lean`: InfoTree explorer at-pos regression checks.
 - `tests/InfoTreeExplorer/RpcContracts.lean`: InfoTree explorer RPC contract checks.
 - `tests/Lib/Resource.lean`: `DevWidgets.Lib.withResource`/`withResourceUnit` behavior.
+- `tests/Examples/Smoke.lean`: import-only smoke test for all runnable demos in `examples/`.
 
-Each file uses Lean-native checks (`#eval` + `throwError`/`IO.userError`) so failures stop `lake test`.
+Most files use Lean-native checks (`#eval` + `throwError`/`IO.userError`), and smoke suites
+use import/elaboration success. Any failure stops `lake test`.

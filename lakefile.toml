@@ -8,6 +8,16 @@ name = "DevWidgets"
 roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DocString", "DevWidgets.Lib"]
 
 [[lean_lib]]
+name = "Examples"
+roots = [
+  "examples.CE",
+  "examples.PTracker",
+  "examples.InfoViewExplorer",
+  "examples.InfoTreeFocused",
+  "examples.DocString"
+]
+
+[[lean_lib]]
 name = "Tests"
 roots = [
   "tests.CE.RpcAndSchema",
@@ -17,5 +27,6 @@ roots = [
   "tests.Lib.Resource",
   "tests.Rpc.QualifiedMethodNames",
   "tests.DocString.Resolver",
-  "tests.DocString.VersoLean"
+  "tests.DocString.VersoLean",
+  "tests.Examples.Smoke"
 ]

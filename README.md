@@ -125,6 +125,7 @@ lake env lean tests/Rpc/QualifiedMethodNames.lean
 lake env lean tests/InfoTreeExplorer/AtPos.lean
 lake env lean tests/DocString/Resolver.lean
 lake env lean tests/DocString/VersoLean.lean
+lake env lean tests/Examples/Smoke.lean
 ```
 
 CI (`.github/workflows/lean_action_ci.yml`) runs these checks on
