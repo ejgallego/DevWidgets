@@ -11,6 +11,7 @@ public import Lean.Server.FileWorker.RequestHandling
 public import Lean.Server.Rpc.RequestHandling
 public import Lean.DocString
 public import Lean.Elab.DocString.Builtin
+public import DevWidgets.Lib.AtPos
 public import DevWidgets.DocString.Markdown
 public import DevWidgets.DocString.Verso
 meta import Lean.Widget.Commands
@@ -32,13 +33,6 @@ structure DocAtPosResponse where
   docFormat : String := "none"
   message : String := "No identifier under cursor."
   deriving FromJson, ToJson
-
-private def constNameAtInfo (info : Elab.Info) : Option Name :=
-  match info with
-  | .ofTermInfo ti => ti.expr.getAppFn.constName?
-  | .ofDelabTermInfo ti => ti.toTermInfo.expr.getAppFn.constName?
-  | .ofFieldInfo fi => some fi.projName
-  | _ => none
 
 private def identAtPos? (stx : Syntax) (pos : String.Pos.Raw) : Option Name :=
   match stx.findStack? (fun stx => stx.getRange?.any (·.contains pos)) with
@@ -207,6 +201,12 @@ def isInDocComment (stx : Syntax) (pos : String.Pos.Raw) : Bool :=
 def isInDocCommentNear (stx : Syntax) (pos : String.Pos.Raw) : Bool :=
   (DevWidgets.DocString.docCommentAtOrNearPos? stx pos).isSome
 
+/-- Testing hook: raw doc-comment preview extraction at/near cursor. -/
+def docCommentPreviewAtOrNearPos?
+    (source : String) (stx : Syntax) (pos : String.Pos.Raw) : Option (String × String) := do
+  let (_, docComment) ← DevWidgets.DocString.docCommentAtOrNearPos? stx pos
+  DevWidgets.DocString.extractDocCommentPreview? source docComment
+
 /-- Testing hook: declaration candidate ordering/dedup used by the resolver. -/
 def declarationCandidates (currNs : Name) (fromCtx? fromStx? : Option Name) : List Name :=
   DevWidgets.DocString.declarationNameCandidates currNs fromCtx? fromStx?
@@ -242,70 +242,67 @@ private def docAtNames? (env : Environment) (candidates : List Name) :
   return none
 
 private def docAtPosImpl (params : DocAtPosParams) : RequestM (RequestTask DocAtPosResponse) := do
-  let doc ← readDoc
-  let text := doc.meta.text
-  let hoverPos := text.lspPosToUtf8Pos params.pos
-  bindWaitFindSnap doc (fun s => s.endPos >= hoverPos)
-    (notFoundX := throw ⟨.invalidParams, s!"no snapshot found at {params.pos}"⟩) fun snap => do
-      RequestM.mapTaskCostly (findInfoTreeAtPos doc hoverPos (includeStop := true)) fun infoTree? => do
-        let nearDocComment? := docCommentAtOrNearPos? snap.stx hoverPos
-        let probePos := nearDocComment?.map (·.1) |>.getD hoverPos
-        let inDocComment? := nearDocComment?.map (·.2)
-        let info? := infoTree?.bind (fun t => t.hoverableInfoAtM? (m := Id) hoverPos (includeStop := true))
-        let infoName? := info?.bind (fun i => constNameAtInfo i.info)
-        let identName? := identAtPos? snap.stx hoverPos
+  DevWidgets.Lib.withSnapshotAtPos params.pos fun atPos => do
+    let hoverPos := atPos.utf8Pos
+    let snap := atPos.snap
+    let nearDocComment? := docCommentAtOrNearPos? snap.stx hoverPos
+    let probePos := nearDocComment?.map (·.1) |>.getD hoverPos
+    let inDocComment? := nearDocComment?.map (·.2)
+    let info? := snap.infoTree.hoverableInfoAtM? (m := Id) hoverPos (includeStop := true)
+    let infoName? := info?.bind (fun i => DevWidgets.Lib.constNameAtInfo? i.info)
+    let identName? := identAtPos? snap.stx hoverPos
 
-        -- 1) Identifier-first lookup (narrowest infotree info, then syntax identifier fallback).
-        let identCandidates := identifierNameCandidates infoName? identName?
-        if let some (declName, docFormat, doc?, docHtml?) ← docAtNames? snap.env identCandidates then
-          return {
-            ident? := identName?
-            declName? := some declName
-            doc? := doc?
-            docHtml? := docHtml?
-            docFormat := docFormat
-            message := s!"Docstring found for `{declName}` ({docFormat})."
-          }
+    -- 1) Identifier-first lookup (narrowest infotree info, then syntax identifier fallback).
+    let identCandidates := identifierNameCandidates infoName? identName?
+    if let some (declName, docFormat, doc?, docHtml?) ← docAtNames? snap.env identCandidates then
+      return {
+        ident? := identName?
+        declName? := some declName
+        doc? := doc?
+        docHtml? := docHtml?
+        docFormat := docFormat
+        message := s!"Docstring found for `{declName}` ({docFormat})."
+      }
 
-        -- 2) Declaration-level lookup (inside declaration body or docstring).
-        let fromCtx? := infoTree?.bind (fun t => parentDeclAtPos? t probePos)
-        let fromStx? := declIdAtPos? snap.stx probePos
-        let currNs := snap.cmdState.scopes.head!.currNamespace
-        let declarationCandidates := declarationNameCandidates currNs fromCtx? fromStx?
-        if let some (declName, docFormat, doc?, docHtml?) ← docAtNames? snap.env declarationCandidates then
-          return {
-            ident? := identName?
-            declName? := some declName
-            doc? := doc?
-            docHtml? := docHtml?
-            docFormat := docFormat
-            message :=
-              if inDocComment?.isSome then
-                s!"Live preview from elaborated docstring for `{declName}`."
-              else
-                s!"Docstring found for declaration `{declName}` ({docFormat})."
-          }
+    -- 2) Declaration-level lookup (inside declaration body or docstring).
+    let fromCtx? := parentDeclAtPos? snap.infoTree probePos
+    let fromStx? := declIdAtPos? snap.stx probePos
+    let currNs := snap.cmdState.scopes.head!.currNamespace
+    let declarationCandidates := declarationNameCandidates currNs fromCtx? fromStx?
+    if let some (declName, docFormat, doc?, docHtml?) ← docAtNames? snap.env declarationCandidates then
+      return {
+        ident? := identName?
+        declName? := some declName
+        doc? := doc?
+        docHtml? := docHtml?
+        docFormat := docFormat
+        message :=
+          if inDocComment?.isSome then
+            s!"Live preview from elaborated docstring for `{declName}`."
+          else
+            s!"Docstring found for declaration `{declName}` ({docFormat})."
+      }
 
-        -- 3) Raw doc-comment fallback only when the cursor is inside a doc comment.
-        if let some docComment := inDocComment? then
-          if let some (docFormat, docText) := extractDocCommentPreview? text.source docComment then
-            return {
-              ident? := identName?
-              doc? := some docText
-              docFormat := docFormat
-              message := "Elaborated preview unavailable; showing raw docstring preview."
-            }
-
-        -- 4) Nothing relevant at cursor.
-        let msg := match identName?, declarationCandidates.head? with
-          | some identName, _ => s!"No docstring found for `{identName}`."
-          | none, some declName => s!"No docstring found for declaration `{declName}`."
-          | none, none => "No identifier or documented declaration under cursor."
+    -- 3) Raw doc-comment fallback only when the cursor is inside a doc comment.
+    if let some docComment := inDocComment? then
+      if let some (docFormat, docText) := extractDocCommentPreview? atPos.text.source docComment then
         return {
           ident? := identName?
-          docFormat := "none"
-          message := msg
+          doc? := some docText
+          docFormat := docFormat
+          message := "Elaborated preview unavailable; showing raw docstring preview."
         }
+
+    -- 4) Nothing relevant at cursor.
+    let msg := match identName?, declarationCandidates.head? with
+      | some identName, _ => s!"No docstring found for `{identName}`."
+      | none, some declName => s!"No docstring found for declaration `{declName}`."
+      | none, none => "No identifier or documented declaration under cursor."
+    return {
+      ident? := identName?
+      docFormat := "none"
+      message := msg
+    }
 
 @[implemented_by docAtPosImpl]
 meta opaque docAtPos (params : DocAtPosParams) : RequestM (RequestTask DocAtPosResponse)
@@ -359,9 +356,28 @@ function fallbackMarkdownHtml(rawDoc) {
   return `<pre><code>${escapeHtml(rawDoc)}</code></pre>`
 }
 
+function formatTone(fmt) {
+  if (fmt === 'verso' || fmt === 'verso-preview') return 'verso'
+  if (fmt === 'markdown' || fmt === 'markdown-preview') return 'markdown'
+  if (fmt === 'none') return 'none'
+  return 'other'
+}
+
+function formatLabel(fmt) {
+  switch (fmt) {
+    case 'verso': return 'Verso'
+    case 'verso-preview': return 'Verso Preview'
+    case 'markdown': return 'Markdown'
+    case 'markdown-preview': return 'Markdown Preview'
+    case 'none': return 'No Doc'
+    default: return String(fmt)
+  }
+}
+
 export default function DocStringWidget(props) {
   const rs = useRpcSession()
   const current = fmtPos(props?.pos)
+  const hasPos = !!props?.pos
   const [markedApi, setMarkedApi] = React.useState(null)
 
   React.useEffect(() => {
@@ -428,6 +444,28 @@ export default function DocStringWidget(props) {
     background: c.bg
   }
 
+  const badgeStyle = (fmt) => {
+    const tone = formatTone(fmt)
+    const map = {
+      verso: { fg: '#4ec9b0', bg: 'rgba(78, 201, 176, 0.12)' },
+      markdown: { fg: '#d7ba7d', bg: 'rgba(215, 186, 125, 0.12)' },
+      none: { fg: c.muted, bg: 'rgba(255,255,255,0.06)' },
+      other: { fg: '#9cdcfe', bg: 'rgba(156, 220, 254, 0.12)' }
+    }
+    const colors = map[tone] || map.other
+    return {
+      display: 'inline-block',
+      padding: '0.08rem 0.45rem',
+      borderRadius: '999px',
+      border: `1px solid ${c.border}`,
+      color: colors.fg,
+      background: colors.bg,
+      fontSize: '0.77em',
+      fontWeight: 700,
+      letterSpacing: '0.02em'
+    }
+  }
+
   const header = React.createElement(
     'div',
     {
@@ -454,13 +492,13 @@ export default function DocStringWidget(props) {
       React.createElement('div', { style: { marginBottom: '0.4rem', color: c.fg, fontWeight: 600 } }, String(decl)),
       React.createElement(
         'div',
-        { style: { marginBottom: '0.45rem', color: c.muted, fontSize: '0.9em', whiteSpace: 'pre-wrap' } },
-        docState.value.message || ''
+        { style: { marginBottom: '0.45rem' } },
+        React.createElement('span', { style: badgeStyle(docFormat) }, formatLabel(docFormat))
       ),
       React.createElement(
         'div',
-        { style: { marginBottom: '0.45rem', color: c.muted, fontSize: '0.82em' } },
-        `format: ${docFormat}`
+        { style: { marginBottom: '0.45rem', color: c.muted, fontSize: '0.9em', whiteSpace: 'pre-wrap' } },
+        docState.value.message || ''
       ),
       React.createElement(
         'div',
@@ -493,7 +531,7 @@ export default function DocStringWidget(props) {
     body = React.createElement(
       'div',
       { style: { color: c.muted } },
-      'Reading docstring at cursor...'
+      hasPos ? 'Reading docstring at cursor...' : 'Move the cursor over an identifier or declaration.'
     )
   }
 

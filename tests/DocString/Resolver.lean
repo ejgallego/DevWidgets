@@ -110,6 +110,32 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
     throwError m!"expected declId in declaration body to be `bodyLookup`, got {declInBody}"
 
 #eval show CoreM Unit from do
+  let src := "    /-- nearby docs -/\n    def nearbyDecl : Nat := 0\n"
+  let cmd ← parseSingleCommand src
+  let some docComment := firstNodeByKind? ``Lean.Parser.Command.docComment cmd
+    | throwError "expected a docComment node"
+  let some docRange := docComment.getRange? (canonicalOnly := true)
+    | throwError "docComment should have a canonical range"
+
+  let posBeforeOne := docRange.start.unoffsetBy ⟨1⟩
+  if DevWidgets.DocString.Testing.isInDocComment cmd posBeforeOne then
+    throwError "expected one-char-before start to be outside doc comment"
+  unless DevWidgets.DocString.Testing.isInDocCommentNear cmd posBeforeOne do
+    throwError "expected one-char-before start to be detected by near-doc lookup"
+
+  let posBeforeFour := docRange.start.unoffsetBy ⟨4⟩
+  if DevWidgets.DocString.Testing.isInDocCommentNear cmd posBeforeFour then
+    throwError "expected four-chars-before start to be outside near-doc lookup window"
+
+  let posInDoc := docRange.start + 'x'
+  let some (fmt, preview) := DevWidgets.DocString.Testing.docCommentPreviewAtOrNearPos? src cmd posInDoc
+    | throwError "expected preview extraction inside doc comment"
+  unless fmt == DevWidgets.DocString.markdownPreviewDocFormat do
+    throwError m!"expected markdown preview format, got {fmt}"
+  unless preview.contains "nearby docs" do
+    throwError m!"expected preview to contain doc body text, got: {preview}"
+
+#eval show CoreM Unit from do
   let c1 := DevWidgets.DocString.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `sampleDecl)
   assertEqNames "candidate ordering: ctx + stx" [`Demo.sampleDecl, `sampleDecl] c1
 
@@ -118,6 +144,9 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
 
   let c3 := DevWidgets.DocString.Testing.declarationCandidates `Demo (some `Demo.sampleDecl) (some `Demo.sampleDecl)
   assertEqNames "candidate dedup" [`Demo.sampleDecl] c3
+
+  let c4 := DevWidgets.DocString.Testing.declarationCandidates Name.anonymous none (some `sampleDecl)
+  assertEqNames "candidate root namespace dedup" [`sampleDecl] c4
 
   let i1 := DevWidgets.DocString.Testing.identifierCandidates (some `Demo.sampleDecl) (some `sampleDecl)
   assertEqNames "identifier ordering: info + ident" [`Demo.sampleDecl, `sampleDecl] i1
