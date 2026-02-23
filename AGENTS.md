@@ -54,6 +54,13 @@ lake check-test
 lake test
 ```
 
+Before pushing any branch (including `main`), run the same local CI gate:
+```bash
+lake build
+lake check-test
+lake test
+```
+
 When touching specific areas, also run focused checks:
 - RPC method names/contracts: `lake env lean tests/Rpc/QualifiedMethodNames.lean`
 - InfoTree explorer behavior: `lake env lean tests/InfoTreeExplorer/AtPos.lean` and `lake env lean tests/InfoTreeExplorer/RpcContracts.lean`
