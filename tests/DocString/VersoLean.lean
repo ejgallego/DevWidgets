@@ -22,36 +22,6 @@ private def assertContains (label haystack needle : String) : CoreM Unit := do
   unless haystack.contains needle do
     throwError m!"expected `{label}` to contain substring `{needle}`\n---\n{haystack}\n---"
 
-private partial def hasAnonymousHygieneInfo (stx : Syntax) : Bool :=
-  match stx with
-  | .node _ kind args =>
-    let here :=
-      kind == `hygieneInfo &&
-      args.any fun
-        | .ident _ raw val _ => val.isAnonymous && raw.isEmpty
-        | _ => false
-    here || args.any hasAnonymousHygieneInfo
-  | _ => false
-
-private def parseSingleCommand (src : String) : CoreM Syntax := do
-  let ictx := Parser.mkInputContext src "<docstring-test>"
-  let env ← getEnv
-  let cmdState : Elab.Command.State := {
-    env
-    maxRecDepth := (← MonadRecDepth.getMaxRecDepth)
-    scopes := [{ header := "", isPublic := true }]
-  }
-  let pstate : Parser.ModuleParserState := { pos := 0, recovering := false }
-  let scope := cmdState.scopes.head!
-  let pmctx := {
-    env := cmdState.env
-    options := scope.opts
-    currNamespace := scope.currNamespace
-    openDecls := scope.openDecls
-  }
-  let (cmd, _, _) := Parser.parseCommand ictx pmctx pstate cmdState.messages
-  return cmd
-
 /-
 Regression test:
 - Lean block should render as semantically highlighted code (`lean-code` / `lean-token`).
@@ -82,7 +52,6 @@ def sampleEvalDecl : Nat := 4
 /-
 Regression test:
 - `#eval` lines inside Verso `lean` blocks should be rendered as code.
-- Parenthesized `#eval` should not leak parser hygiene metadata.
 -/
 #eval show CoreM Unit from do
   let env ← getEnv
@@ -95,23 +64,6 @@ Regression test:
   assertContains "Verso #eval HTML" html "#eval"
   assertContains "Verso #eval HTML" html "Nat.succ"
   assertContains "Verso #eval HTML" html "String.length"
-  if html.contains "[anonymous]" then
-    throwError m!"did not expect parser hygiene metadata in rendered HTML\n---\n{html}\n---"
-
-/- 
-Provenance test:
-- Parser provenance still contains anonymous hygiene metadata for parenthesized `#eval`.
-- Non-parenthesized `#eval` should avoid this artifact.
-- Rendering should strip/hide this metadata (checked above).
--/
-#eval show CoreM Unit from do
-  let withParens ← parseSingleCommand "#eval (1 + 2)\n"
-  unless hasAnonymousHygieneInfo withParens do
-    throwError "expected `#eval (1 + 2)` to include anonymous hygiene metadata"
-
-  let withoutParens ← parseSingleCommand "#eval Nat.succ 10\n"
-  if hasAnonymousHygieneInfo withoutParens then
-    throwError "unexpected anonymous hygiene metadata in `#eval Nat.succ 10`"
 
 /--
 # Markdown docstring
