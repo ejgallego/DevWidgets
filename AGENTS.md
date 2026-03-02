@@ -3,7 +3,7 @@
 ## Repository Context
 
 This repository (`dev-widgets`) provides Lean 4 developer-focused InfoView widgets.
-Current target toolchain is `leanprover/lean4-nightly` (see `lean-toolchain`).
+Current target toolchain is `leanprover/lean4:v4.29.0-rc3` (see `lean-toolchain`).
 
 Main modules:
 - `DevWidgets.CE`: compiler exploration panel (IR/LCNF + options).
