@@ -22,6 +22,7 @@ Main modules:
 Useful example entry points:
 - `examples/CE.lean`
 - `examples/PTracker.lean`
+- `examples/InfoViewExplorer.lean`
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
 
@@ -43,6 +44,7 @@ lake env lean tests/Rpc/QualifiedMethodNames.lean
 lake env lean tests/InfoTreeExplorer/AtPos.lean
 lake env lean tests/DocString/Resolver.lean
 lake env lean tests/DocString/VersoLean.lean
+lake env lean tests/Examples/Smoke.lean
 ```
 
 ## Contribution Workflow
@@ -67,6 +69,7 @@ When touching specific areas, also run focused checks:
 - DocString resolution/rendering: `lake env lean tests/DocString/Resolver.lean` and `lake env lean tests/DocString/VersoLean.lean`
 - CE schema/RPC surface: `lake env lean tests/CE/RpcAndSchema.lean`
 - PTracker RPC surface: `lake env lean tests/PTracker/RpcContracts.lean`
+- Lib resource helpers: `lake env lean tests/Lib/Resource.lean`
 
 PR hygiene expectations:
 - Keep changes scoped to one widget or one cross-cutting concern when possible.
@@ -90,6 +93,7 @@ Guidelines:
 
 ## Notes For Agents
 
+- Create git worktrees under `.worktrees/` (plural) to match local testing setup expectations.
 - Prefer fully-qualified RPC method names in widget JS and tests.
 - Keep docs/examples aligned with API changes, especially for draft modules like `DocString`.
 - When adding RPC/widget behavior, include regression coverage under `tests/`.
