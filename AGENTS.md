@@ -93,6 +93,7 @@ Guidelines:
 
 ## Notes For Agents
 
+- Create git worktrees under `.worktrees/` (plural) to match local testing setup expectations.
 - Prefer fully-qualified RPC method names in widget JS and tests.
 - Keep docs/examples aligned with API changes, especially for draft modules like `DocString`.
 - When adding RPC/widget behavior, include regression coverage under `tests/`.
