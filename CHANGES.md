@@ -8,6 +8,6 @@ unreleased
 - [DocString] New cursor-focused docstring widget (`DevWidgets.DocString`) with Markdown/Verso rendering, declaration fallback resolution, examples, and regression tests.
 - [DocString] Marked as draft/demo quality in docs while API/UX stabilizes.
 - [CI] Build `DevWidgets.DocString` by default and run RPC/docstring regression tests in CI.
-- [CI] Target nightly Lean toolchain only for this development cycle.
+- [CI] Move project toolchain target to `leanprover/lean4:v4.29.0-rc3`.
 - [Docs] Expand `README.md` with widget usage, examples, and reproducible local test commands.
 - [Tests] Add `tests/Examples/Smoke.lean` and an `Examples` Lean library so demos are compiled during `lake test`.

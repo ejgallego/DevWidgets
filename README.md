@@ -3,7 +3,7 @@
 Interactive Lean infoview widgets for compiler output, progress tracking,
 info trees, and docstring inspection.
 
-Current development target: `leanprover/lean4-nightly` (from `lean-toolchain`).
+Current development target: `leanprover/lean4:v4.29.0-rc3` (from `lean-toolchain`).
 
 ## Widgets
 
