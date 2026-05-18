@@ -546,7 +546,7 @@ attribute [server_rpc_method] infoTreeAtPos
 @[widget_module]
 def infoTreeExplorerWidget : Lean.Widget.Module where
   javascript := "
-    import { useAsync, useRpcSession, mapRpcError } from '@leanprover/infoview'
+    import { useAsyncPersistent, useRpcSession, mapRpcError } from '@leanprover/infoview'
     import * as React from 'react';
 
     const e = React.createElement;
@@ -739,7 +739,7 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
       const rs = useRpcSession();
       const [forceOpen, setForceOpen] = React.useState(null);
 
-      const capture = useAsync(async () => {
+      const capture = useAsyncPersistent(async () => {
         if (!props?.pos) {
           return {
             summary: 'No cursor position available yet.',
