@@ -9,6 +9,7 @@ module
 public import Lean.Server.FileWorker.RequestHandling
 public import Lean.Server.Rpc.RequestHandling
 public import Lean.Compiler.IR
+public import Lean.Compiler.Options
 public import Lean.Compiler.LCNF.Main
 public import Lean.Compiler.LCNF.ToDecl
 public import Lean.Compiler.LCNF.PrettyPrinter
@@ -376,13 +377,8 @@ def toDecls (opts : CECompilerOptions) : CECompilerOptionDecls := {
 
 end CECompilerOptions
 
-private def ceOptionSchemaImpl (_ : CEOptionSchemaParams) : RequestM (RequestTask CEOptionSchema) := do
+def ceOptionSchemaImpl (_ : CEOptionSchemaParams) : RequestM (RequestTask CEOptionSchema) := do
   return RequestTask.pure ceOptionSchemaValue
-
-@[implemented_by ceOptionSchemaImpl]
-meta opaque ceOptionSchema (_ : CEOptionSchemaParams) : RequestM (RequestTask CEOptionSchema)
-
-attribute [server_rpc_method] ceOptionSchema
 
 /-- Structured code representation sent to UI.
 `lines` keeps nested structure for rendering/folding/indentation workflows. -/
@@ -569,8 +565,8 @@ private def getStoredIRCode (declName : Name) : CoreM CECodeResult := do
   if let some decl := local? then
     return .available (irDeclToCodeRepr decl) .localEnvironment {}
   let imported? :=
-    Lean.IR.findEnvDecl (includeServer := true) env declName <|>
-    Lean.IR.findEnvDecl (includeServer := true) env (declName ++ `_boxed)
+    Lean.IR.findEnvDecl env declName <|>
+    Lean.IR.findEnvDecl env (declName ++ `_boxed)
   if let some decl := imported? then
     return .available (irDeclToCodeRepr decl) .importedEnvironment {}
   return .unavailable .notFoundInEnvironment
@@ -592,15 +588,23 @@ private def getStoredLCNFCode (display : CEDisplayOptionDecls) (declName : Name)
   catch e =>
     return .unavailable (.compilationFailed (← e.toMessageData.toString))
 
+/-- Run the compiler immediately, even in modules that postpone non-meta compilation. -/
+private def compileForInspection (declName : Name) : CoreM Unit :=
+  withOptions (Lean.Compiler.compiler.postponeCompile.set · false) do
+    Lean.Compiler.LCNF.main #[declName] (← getOptions)
+
 private def compileIRCode (compiler : CECompilerOptionDecls) (declName : Name)
     (origin : CECodeOrigin) : CoreM CECodeResult := do
   try
-    let sccs ← withCompilerOptions compiler <| Lean.Compiler.LCNF.compile #[declName]
-    if sccs.isEmpty then
+    let before := (Lean.IR.getDecls (← getEnv)).length
+    withCompilerOptions compiler <| compileForInspection declName
+    -- The compiler now publishes IR in the environment rather than returning SCCs.
+    -- Entries are newest first; retain only code emitted by this invocation.
+    let allDecls := Lean.IR.getDecls (← getEnv)
+    let decls := (allDecls.take (allDecls.length - before)).reverse.toArray
+    if decls.isEmpty then
       return .unavailable .compilationReturnedNoCode
-    let sccCode : Array CECodeRepr :=
-      sccs.map fun scc => .lines (scc.map irDeclToCodeRepr)
-    let code := .lines sccCode
+    let code := .lines (decls.map irDeclToCodeRepr)
     return .available code origin { compiler? := some compiler }
   catch e =>
     return .unavailable (.compilationFailed (← e.toMessageData.toString))
@@ -610,7 +614,7 @@ private def compileLCNFCode (display : CEDisplayOptionDecls) (compiler : CECompi
     (declName : Name) (origin : CECodeOrigin) : CoreM CECodeResult := do
   try
     if recompileViaPipeline then
-      let _ ← withCompilerOptions compiler <| Lean.Compiler.LCNF.compile #[declName]
+      withCompilerOptions compiler <| compileForInspection declName
       let localDecl? ← Lean.Compiler.LCNF.CompilerM.run do
         let direct? ← Lean.Compiler.LCNF.getLocalDeclAt? declName .base
         match direct? with
@@ -626,6 +630,19 @@ private def compileLCNFCode (display : CEDisplayOptionDecls) (compiler : CECompi
       return .available code origin { display? := some display, compiler? := some compiler }
   catch e =>
     return .unavailable (.compilationFailed (← e.toMessageData.toString))
+
+namespace Testing
+
+/-- Exercise both recompilation paths, including when module compilation is postponed. -/
+def recompile (declName : Name) (viaPipeline : Bool := true) : CoreM (CECodeResult × CECodeResult) := do
+  withEnv (← getEnv) do
+    let compiler := ({} : CECompilerOptions).toDecls
+    let display := ({} : CEDisplayOptions).toDecls
+    let ir ← compileIRCode compiler declName .recompiledForced
+    let lcnf ← compileLCNFCode display compiler viaPipeline declName .recompiledForced
+    return (ir, lcnf)
+
+end Testing
 
 private structure AnalysisResult where
   shouldGenerate : Bool := false
@@ -785,7 +802,7 @@ private def mkDebugInfo (_params : IRAtPosParams)
   | none => out
 
 open Server RequestM
-private def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse) := do
+def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse) := do
   DevWidgets.Lib.withConstAtPos params.pos (global := false) fun constAt? => do
     let some constAt := constAt?
       | return .noDeclaration "No declaration under cursor."
@@ -824,10 +841,5 @@ private def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPos
       usedHelperFallback := resolved.usedHelperFallback
       debugInfo
     }
-
-@[implemented_by irAtPosImpl]
-meta opaque irAtPos (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse)
-
-attribute [server_rpc_method] irAtPos
 
 end DevWidgets.CE

@@ -14,13 +14,16 @@ roots = [
   "examples.PTracker",
   "examples.InfoViewExplorer",
   "examples.InfoTreeFocused",
-  "examples.DocString"
+  "examples.DocString",
+  "examples.Configuration"
 ]
 
 [[lean_lib]]
 name = "Tests"
+needs = ["widgetRuntime", "widgetServer"]
 roots = [
   "tests.CE.RpcAndSchema",
+  "tests.CE.Compilation",
   "tests.PTracker.RpcContracts",
   "tests.InfoTreeExplorer.AtPos",
   "tests.InfoTreeExplorer.RpcContracts",
@@ -28,5 +31,19 @@ roots = [
   "tests.Rpc.QualifiedMethodNames",
   "tests.DocString.Resolver",
   "tests.DocString.VersoLean",
+  "tests.Widget.Runtime",
+  "tests.Widget.Activation",
+  "tests.Widget.DefaultActivation",
+  "tests.Widget.Server",
   "tests.Examples.Smoke"
 ]
+
+[[input_file]]
+name = "widgetRuntime"
+path = "tests/Widget/runtime.mjs"
+text = true
+
+[[input_file]]
+name = "widgetServer"
+path = "tests/Widget/server.mjs"
+text = true

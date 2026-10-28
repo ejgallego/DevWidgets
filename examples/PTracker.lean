@@ -1,4 +1,4 @@
-import DevWidgets.PTracker.Widget
+import DevWidgets.PTracker
 import Lean.Widget
 import Lean
 
@@ -34,7 +34,5 @@ elab_rules : command
           liftIO <| mainRef.update done (label? := some s!"main step: {done} / {steps}")
           if sleepMs != 0 then
             liftIO <| IO.sleep sleepMs
-
-show_panel_widgets [progressWidget]
 
 #progress_elab 111 54220 102

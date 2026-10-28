@@ -3,6 +3,7 @@ import examples.PTracker
 import examples.InfoViewExplorer
 import examples.InfoTreeFocused
 import examples.DocString
+import examples.Configuration
 
 namespace DevWidgets.Tests.Examples.Smoke
 

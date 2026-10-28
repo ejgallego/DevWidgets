@@ -1,6 +1,25 @@
 unreleased
 ----------
 
+- [Tests] Exercise independent activation, configured panels, all widget RPC endpoints, edits, and cross-file progress isolation against a real Lean server in `lake test`.
+- [Lib] Share cursor pin/follow, refresh, reset, and configuration-override behavior across independent widgets.
+- [CE] Add typed panel configuration and a verbose inspection preset; reset can restore Lean-supplied defaults.
+- [InfoTreeExplorer] Add focused/detailed presets, configurable child/depth limits, and explicit truncation markers.
+- [InfoTreeExplorer] Preserve retained results while loading and pin them with their original source position.
+- [DocString] Add configurable panel height and shared cursor controls; the widget remains draft/demo quality.
+- [PTracker] Enable the panel from the short import and provide a panel-free `.API` import, configurable polling/retention, and Live/Quiet/Manual controls.
+- [Docs] Document independent activation and `.API` imports for all widgets, with a runnable configuration example.
+- [CI] Update the development toolchain to `leanprover/lean4:v4.36.0-rc2`.
+- [CE] Adapt recompilation to Lean 4.36's compiler entry point and postponed module compilation.
+- [DocString] Adapt Verso custom elements and preserve fallback text for deferred elements; the widget remains draft/demo quality.
+- [InfoTreeExplorer] Recognize choice-resolution info nodes introduced by the new toolchain.
+- [Tests] Cover compiler execution, deferred Verso rendering, and executable RPC registration under Lean 4.36. CE and DocString register their RPC handlers from the documented root imports.
+
+- [CE] Fix the Defaults button to read serialized schema field names, preserving backend boolean and numeric defaults.
+- [InfoTreeExplorer] Send the source URI under its JSON field name so snapshot summaries retain it.
+- [PTracker] Refresh on RPC session changes and ignore late reads/deletes from earlier sessions or unmounted panels.
+- [Tests] Add JavaScript runtime regression checks with Lean-serialized fixtures; `lake test` now requires Node.js 22 or later.
+- [Docs] Align test-suite documentation and CI instructions with the pinned toolchain and complete local gate.
 - [PTracker] First usable version, with resource bracket.
 - [InfoTreeExplorer] Refactor to cursor-position RPC (`infoTreeAtPos`), remove `#infotree_explorer` polling workflow, and add richer focused-path visualization plus regression coverage.
 - [InfoTreeExplorer] Use fully-qualified RPC method names from widget JS (`DevWidgets.InfoTreeExplorer.infoTreeAtPos`).

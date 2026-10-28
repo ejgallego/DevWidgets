@@ -3,14 +3,23 @@
 Interactive Lean infoview widgets for compiler output, progress tracking,
 info trees, and docstring inspection.
 
-Current development target: `leanprover/lean4:v4.29.0-rc3` (from `lean-toolchain`).
+Current development target: `leanprover/lean4:v4.36.0-rc2` (from `lean-toolchain`).
 
-## Widgets
+## Choose a widget
 
-- `DevWidgets.CE`: Compiler Explorer panel for IR/LCNF inspection.
-- `DevWidgets.PTracker`: progress tracker API and widget for long-running elaboration.
-- `DevWidgets.InfoTreeExplorer`: cursor-focused info tree explorer panel.
-- `DevWidgets.DocString`: cursor-focused docstring inspector with Markdown/Verso rendering.
+Each widget works independently. Import its short module name to enable its panel:
+
+| Task | Import |
+| --- | --- |
+| Inspect IR/LCNF and compiler options | `DevWidgets.CE` |
+| Monitor a long-running tactic or command | `DevWidgets.PTracker` |
+| Investigate elaboration around the cursor | `DevWidgets.InfoTreeExplorer` |
+| Read Markdown/Verso documentation | `DevWidgets.DocString` |
+
+Use the corresponding `.API` import to access definitions and RPC handlers without
+enabling a panel. For example, `import DevWidgets.PTracker.API` provides the progress
+API and widget definition without showing it. The lighter
+`DevWidgets.PTracker.ProgressRef` import provides only the reporting API.
 
 See runnable demos in `examples/`.
 
@@ -29,10 +38,60 @@ Then open any file from `examples/` in Lean/VSCode:
 - `examples/InfoViewExplorer.lean`
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
+- `examples/Configuration.lean`
+
+## Activation and configuration
+
+Use Lean's existing panel command with a typed widget configuration:
+
+```lean
+import DevWidgets.PTracker.API
+
+show_panel_widgets [local DevWidgets.PTracker.progressWidget with
+  ({ DevWidgets.PTracker.Config.quiet with autoRemove := false } : DevWidgets.PTracker.Config)]
+```
+
+`local` limits activation to the current section/file. Omit it to activate the panel
+in downstream imports too. `scoped` activation is also supported by Lean.
+Hide a panel for the current scope with:
+
+```lean
+show_panel_widgets [-DevWidgets.PTracker.progressWidget]
+```
+
+Configurations and task presets stay specific to each widget:
+
+| Widget | Configuration fields | Named presets |
+| --- | --- | --- |
+| CE | `display`, `compiler`, `showAdvanced`, `lcnfRecompileViaPipeline` | `CE.Config.verbose` |
+| InfoTreeExplorer | `maxChildren`, `maxDepth` | `InfoTreeExplorer.Config.focused`, `.detailed` |
+| DocString | `maxHeight` in pixels | `DocString.Config.expanded` |
+| PTracker | `autoRefresh`, `intervalMs`, `autoRemove`, `retainDoneMs` | `PTracker.Config.quiet`, `.manual` |
+
+All names above are under `DevWidgets`. An empty `Config` uses the widget's defaults.
+See [`examples/Configuration.lean`](./examples/Configuration.lean) for all four widgets.
+
+CE, InfoTreeExplorer, and DocString share **Pin result**, **Follow cursor**, **Refresh**,
+and **Reset panel** controls. Pinning freezes the displayed response and its source
+position; it does not keep requesting a potentially changed file. Follow the cursor
+again to refresh. **Reset panel** restores the Lean-supplied configuration and unpins.
+CE's separate **Defaults** button restores the compiler schema defaults.
+
+UI overrides belong to the current panel instance; they are not saved across remounts.
+Changing the configuration in Lean replaces those overrides. Keep reusable settings
+in a Lean `Config` value. PTracker uses polling controls instead of cursor pinning;
+**Manual** disables periodic refresh and automatic removal, while still allowing
+the initial read and explicit refresh/removal.
+
+InfoTreeExplorer clamps children per node to 1–100 and tree depth to 1–64, and marks
+truncated branches. These limits bound rendered tree expansion, not info collection
+or every snapshot-summary traversal. PTracker clamps polling to 100–60,000 ms and
+retention to 1–3,600 seconds. Automatic removal deletes completed registry entries,
+so another panel viewing the same registry will also stop seeing them.
 
 ## Tests
 
-Run all tests with:
+Run all tests with Node.js 22 or later on `PATH` (no npm install is needed):
 
 ```bash
 lake test
@@ -49,7 +108,8 @@ This is an interactive complement to `set_option trace.Compiler.*`:
 - shows IR and LCNF (when available),
 - supports folding and syntax highlighting,
 - exposes pretty-printer/compiler tuning options,
-- can compile on-the-fly and diff outputs.
+- can compile on-the-fly and diff outputs,
+- restores option values from the backend schema with the **Defaults** button.
 
 Import:
 
@@ -81,6 +141,9 @@ def ProgressRef.update
 ```
 
 Tip: call `Lean.Core.checkInterrupted` at safe points in long loops.
+
+The panel refreshes automatically and reconnects when the InfoView RPC session
+changes. Replies from an earlier session are discarded.
 
 ## `DevWidgets.InfoTreeExplorer`
 
@@ -118,7 +181,15 @@ Example file: `examples/DocString.lean`.
 
 ## Regression Tests
 
-Run all regression tests used by CI:
+Run the same local gate as CI:
+
+```bash
+lake build
+lake check-test
+lake test
+```
+
+For focused regression checks:
 
 ```bash
 lake env lean tests/Rpc/QualifiedMethodNames.lean
@@ -126,7 +197,9 @@ lake env lean tests/InfoTreeExplorer/AtPos.lean
 lake env lean tests/DocString/Resolver.lean
 lake env lean tests/DocString/VersoLean.lean
 lake env lean tests/Examples/Smoke.lean
+lake env lean tests/Widget/Runtime.lean
+lake env lean tests/Widget/Server.lean
 ```
 
-CI (`.github/workflows/lean_action_ci.yml`) runs these checks on
-the repo nightly toolchain.
+CI (`.github/workflows/lean_action_ci.yml`) builds the package and runs all suites
+registered in `lakefile.toml` using the toolchain pinned in `lean-toolchain`.

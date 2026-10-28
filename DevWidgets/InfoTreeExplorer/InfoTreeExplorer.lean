@@ -5,6 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
+import DevWidgets.Lib.Panel
 import Lean.Data.Lsp
 import Lean.Server
 import Lean.Widget.UserWidget
@@ -22,7 +23,27 @@ open Lean Server Lsp RequestM
 structure InfoTreeAtPosParams where
   pos : Lsp.Position
   uri? : Option DocumentUri := none
+  maxChildren? : Option Nat := none
+  maxDepth? : Option Nat := none
   deriving FromJson, ToJson
+
+/-- Limits for the rendered trees. These do not change Lean's elaboration info collection. -/
+structure Config where
+  maxChildren : Nat := 30
+  maxDepth : Nat := 32
+  deriving FromJson, ToJson
+
+/-- A compact tree for following local elaboration. -/
+def Config.focused : Config := { maxChildren := 10, maxDepth := 12 }
+
+/-- More context for investigating complex elaboration. -/
+def Config.detailed : Config := { maxChildren := 60, maxDepth := 48 }
+
+/-- Bound client-supplied rendering limits. -/
+def Config.bounded (config : Config) : Config := {
+  maxChildren := max 1 (min 100 config.maxChildren)
+  maxDepth := max 1 (min 64 config.maxDepth)
+}
 
 structure ExplorerCapture where
   summary : String := "No infotree summary captured yet. Move the cursor in a Lean file to populate this panel."
@@ -60,6 +81,7 @@ meta def infoTag (info : Elab.Info) : String :=
   | .ofFieldRedeclInfo _ => "fieldRedecl"
   | .ofDelabTermInfo _ => "delabTerm"
   | .ofChoiceInfo _ => "choice"
+  | .ofChoiceResolutionInfo _ => "choiceResolution"
   | .ofDocInfo _ => "doc"
   | .ofDocElabInfo _ => "docElab"
 
@@ -352,16 +374,19 @@ meta def stxLabel (text : FileMap) (stx : Syntax) : String :=
 meta partial def infoTreeToExplorerTree
     (text : FileMap)
     (maxChildren : Nat := 30)
-    : Option Elab.CommandContextInfo → Elab.InfoTree → Json
-  | _, .hole id =>
+    (parentCommandCtx? : Option Elab.CommandContextInfo) (tree : Elab.InfoTree)
+    (maxDepth : Nat := 32) : Json :=
+  if maxDepth == 0 then treeJson "... (depth limit reached)" else
+  match tree with
+  | .hole id =>
     treeJson s!"hole {id.name}"
-  | parentCommandCtx?, .context pc tree =>
+  | .context pc tree =>
     match pc with
     | .commandCtx ctx =>
       let delta := commandCtxDelta parentCommandCtx? ctx
       treeJsonExt
         s!"context[commandCtx] ({delta.summary})"
-        #[infoTreeToExplorerTree text maxChildren (some ctx) tree]
+        #[infoTreeToExplorerTree text maxChildren (some ctx) tree (maxDepth - 1)]
         [ ("nodeType", Json.str "commandCtx")
         , ("commandCtxChanged", Json.bool delta.changed)
         , ("commandCtxMainModuleChanged", Json.bool delta.mainModuleChanged)
@@ -369,13 +394,13 @@ meta partial def infoTreeToExplorerTree
         ]
     | .parentDeclCtx parentDecl =>
       treeJson s!"context[parentDecl={parentDecl}]"
-        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree]
+        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree (maxDepth - 1)]
     | .autoImplicitCtx implicits =>
       treeJson s!"context[autoImplicit={implicits.size}]"
-        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree]
-  | parentCommandCtx?, .node info children =>
+        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree (maxDepth - 1)]
+  | .node info children =>
     let renderedChildren :=
-      children.toList.take maxChildren |>.map (infoTreeToExplorerTree text maxChildren parentCommandCtx?)
+      children.toList.take maxChildren |>.map (fun child => infoTreeToExplorerTree text maxChildren parentCommandCtx? child (maxDepth - 1))
     let childArray := renderedChildren.toArray
     let childArray :=
       if children.size > maxChildren then
@@ -387,7 +412,9 @@ meta partial def infoTreeToExplorerTree
 meta partial def stxToExplorerTree
     (text : FileMap)
     (maxChildren : Nat := 40)
-    : Syntax → Json
+    (stx : Syntax) (maxDepth : Nat := 32) : Json :=
+  if maxDepth == 0 then treeJson "... (depth limit reached)" else
+  match stx with
   | .missing =>
     treeJson "syntax.missing"
   | stx@(.atom ..) =>
@@ -396,7 +423,7 @@ meta partial def stxToExplorerTree
     treeJson (stxLabel text stx)
   | stx@(.node _ _ args) =>
     let renderedChildren :=
-      args.toList.take maxChildren |>.map (stxToExplorerTree text maxChildren)
+      args.toList.take maxChildren |>.map (fun child => stxToExplorerTree text maxChildren child (maxDepth - 1))
     let childArray := renderedChildren.toArray
     let childArray :=
       if args.size > maxChildren then
@@ -515,7 +542,8 @@ meta def captureSummary
     (position : Lsp.Position)
     (snap : Lean.Server.Snapshots.Snapshot)
     (pos : String.Pos.Raw)
-    : ExplorerCapture :=
+    (config : Config := {}) : ExplorerCapture :=
+  let config := config.bounded
   let infoTree := Lean.Server.Snapshots.Snapshot.infoTree snap
   let infoNodeCount := infoTree.foldInfo (init := 0) fun _ctx _info n => n + 1
   let subtrees := rootSubtreeCount infoTree
@@ -524,8 +552,8 @@ meta def captureSummary
   let focusedNodes := (focusedPathsWithInfo text pos infoTree).take 6
   let customAtPosCount := customInfoNodesAtPosCount infoTree pos
   let summary := captureSummaryText text uri? position snap pos
-  let tree := infoTreeToExplorerTree text 30 none infoTree
-  let stxTree := stxToExplorerTree text 40 snap.stx
+  let tree := infoTreeToExplorerTree text config.maxChildren none infoTree config.maxDepth
+  let stxTree := stxToExplorerTree text config.maxChildren snap.stx config.maxDepth
   { summary
   , tree := some tree
   , stxTree := some stxTree
@@ -536,7 +564,10 @@ meta def captureSummary
 
 private def infoTreeAtPosImpl (params : InfoTreeAtPosParams) : RequestM (RequestTask ExplorerCapture) := do
   DevWidgets.Lib.withSnapshotAtPos params.pos fun atPos => do
-    return captureSummary atPos.text params.uri? params.pos atPos.snap atPos.utf8Pos
+    return captureSummary atPos.text params.uri? params.pos atPos.snap atPos.utf8Pos {
+      maxChildren := params.maxChildren?.getD 30
+      maxDepth := params.maxDepth?.getD 32
+    }
 
 @[implemented_by infoTreeAtPosImpl]
 meta opaque infoTreeAtPos (params : InfoTreeAtPosParams) : RequestM (RequestTask ExplorerCapture)
@@ -545,7 +576,7 @@ attribute [server_rpc_method] infoTreeAtPos
 
 @[widget_module]
 def infoTreeExplorerWidget : Lean.Widget.Module where
-  javascript := "
+  javascript := DevWidgets.Lib.Panel.javascript ++ "
     import { useAsyncPersistent, useRpcSession, mapRpcError } from '@leanprover/infoview'
     import * as React from 'react';
 
@@ -737,9 +768,15 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
 
     export default function (props) {
       const rs = useRpcSession();
+      const control = useCursorControls(props?.pos);
+      const [limits, setLimits, resetLimits] = usePanelSettings({
+        maxChildren: boundedNat(props?.maxChildren, 30, 1, 100),
+        maxDepth: boundedNat(props?.maxDepth, 32, 1, 64)
+      });
       const [forceOpen, setForceOpen] = React.useState(null);
 
-      const capture = useAsyncPersistent(async () => {
+      const liveCapture = useAsyncPersistent(async () => {
+        if (control.pinned) return undefined;
         if (!props?.pos) {
           return {
             summary: 'No cursor position available yet.',
@@ -747,9 +784,11 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
             stxTree: null
           };
         }
-        const params = { pos: props.pos, 'uri?': props?.pos?.uri ?? null };
-        return await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params);
-      }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character]);
+        const params = { pos: props.pos, uri: props?.pos?.uri ?? null, ...limits };
+        const value = await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params);
+        return { ...value, sourcePos: { ...props.pos } };
+      }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character, control.pinned, control.revision, limits.maxChildren, limits.maxDepth]);
+      const capture = control.view(liveCapture);
 
       const payload =
         capture.state === 'resolved' && capture.value
@@ -789,8 +828,10 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
         paddingBottom: '0.45rem',
         listStyle: 'none'
       };
-      const cursorLabel = props?.pos
-        ? 'L' + (props.pos.line + 1) + ':' + (props.pos.character + 1)
+      // Persistent results retain their own position while the next request is loading.
+      const resultPos = payload.sourcePos || control.pos;
+      const cursorLabel = resultPos
+        ? 'L' + (resultPos.line + 1) + ':' + (resultPos.character + 1)
         : 'cursor unknown';
       const factMap = Object.fromEntries(facts.map(pair => [pair[0], pair[1]]));
       const headerChips = [
@@ -821,6 +862,31 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
 
       return e('details', { open: true, style: { marginTop: '0.5rem' } },
         e('summary', null, 'InfoTree Explorer'),
+        cursorToolbar(control, capture, () => { resetLimits(); setForceOpen(null); }, resultPos),
+        (!control.pos || capture.state !== 'resolved' || (!payload.tree && !payload.stxTree))
+          ? e('div', {
+              role: capture.state === 'rejected' ? 'alert' : 'status',
+              style: { whiteSpace: 'pre-wrap', color: capture.state === 'rejected'
+                ? 'var(--vscode-errorForeground)' : 'var(--vscode-descriptionForeground)' }
+            }, control.pos ? payload.summary : 'Move the cursor into a declaration to inspect elaboration.')
+          : null,
+        e('details', {},
+          e('summary', {}, 'Tree settings'),
+          e('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' } },
+            panelButton('Focused', () => setLimits({ maxChildren: 10, maxDepth: 12 }), control.pinned),
+            panelButton('Detailed', () => setLimits({ maxChildren: 60, maxDepth: 48 }), control.pinned),
+            e('label', {}, 'Children per node ', e('input', {
+              type: 'number', min: 1, max: 100, value: limits.maxChildren, disabled: control.pinned,
+              onChange: (ev) => setLimits((prev) => ({ ...prev, maxChildren: boundedNat(Number(ev.target.value), 30, 1, 100) })),
+              style: { width: '4rem' }
+            })),
+            e('label', {}, 'Tree depth ', e('input', {
+              type: 'number', min: 1, max: 64, value: limits.maxDepth, disabled: control.pinned,
+              onChange: (ev) => setLimits((prev) => ({ ...prev, maxDepth: boundedNat(Number(ev.target.value), 32, 1, 64) })),
+              style: { width: '4rem' }
+            }))
+          )
+        ),
         e('div', {
           style: {
             marginTop: '0.42rem',

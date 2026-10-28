@@ -7,14 +7,39 @@ Author: Emilio J. Gallego Arias
 module
 
 public import Lean.Widget.UserWidget
+public meta import Lean.Widget.UserWidget
 public import DevWidgets.CE.Analysis
+public import DevWidgets.Lib.Panel
+public meta import DevWidgets.Lib.Panel
 public section
 
 namespace DevWidgets.CE
 
 open Lean Widget
 
-def widgetJs : String := r#"
+/-- Initial panel settings for `show_panel_widgets [compilerExplorerWidget with config]`. -/
+structure Config where
+  display : CEDisplayOptions := {}
+  compiler : CECompilerOptions := {}
+  showAdvanced : Bool := false
+  lcnfRecompileViaPipeline : Bool := true
+  deriving ToJson, FromJson
+
+/-- Detailed printed output with default compiler options. -/
+def Config.verbose : Config := {
+  display := {
+    ppLetVarTypes := true
+    ppFunBinderTypes := true
+    ppExplicit := true
+    ppAll := true
+    ppFullNames := true
+    ppPrivateNames := true
+    ppUniverses := true
+  }
+  showAdvanced := true
+}
+
+def widgetJs : String := DevWidgets.Lib.Panel.javascript ++ r#"
 import * as React from 'react'
 import { useAsync, useRpcSession, mapRpcError } from '@leanprover/infoview'
 
@@ -286,32 +311,33 @@ function renderIndentFoldedCode(key, text, emptyText, c, foldState, setFoldState
 
 export default function ClickPositionWidget(props) {
   const rs = useRpcSession()
-  const current = fmtPos(props?.pos)
+  const control = useCursorControls(props?.pos)
+  const current = fmtPos(control.pos)
   const [irFoldState, setIrFoldState] = React.useState({})
   const [lcnfFoldState, setLcnfFoldState] = React.useState({})
-  const [showAdvanced, setShowAdvanced] = React.useState(false)
+  const [showAdvanced, setShowAdvanced] = usePanelSettings(props?.showAdvanced === true)
   const [forceRecompile, setForceRecompile] = React.useState(false)
-  const [lcnfRecompileViaPipeline, setLcnfRecompileViaPipeline] = React.useState(true)
+  const [lcnfRecompileViaPipeline, setLcnfRecompileViaPipeline] = usePanelSettings(props?.lcnfRecompileViaPipeline !== false)
 
   const fallbackSchema = React.useMemo(() => ({
     display: [
-      { id: 'ppLetVarTypes', kind: 'toggle', label: 'LCNF let var types', description: 'Include type annotations on let bindings.', 'defaultBool?': false, leanOption: 'pp.letVarTypes' },
-      { id: 'ppFunBinderTypes', kind: 'toggle', label: 'LCNF binder types', description: 'Include type annotations on function parameters.', 'defaultBool?': false, leanOption: 'pp.funBinderTypes' },
-      { id: 'ppExplicit', kind: 'toggle', label: 'Explicit arguments', description: 'Show implicit arguments when available.', 'defaultBool?': false, leanOption: 'pp.explicit' },
-      { id: 'ppAll', kind: 'toggle', label: 'All details', description: 'Include extra details in printed terms.', 'defaultBool?': false, leanOption: 'pp.all' },
-      { id: 'ppFullNames', kind: 'toggle', label: 'Full names', description: 'Avoid abbreviated names in output.', 'defaultBool?': false, leanOption: 'pp.fullNames' },
-      { id: 'ppPrivateNames', kind: 'toggle', label: 'Private names', description: 'Display private/internal names explicitly.', 'defaultBool?': false, leanOption: 'pp.privateNames' },
-      { id: 'ppUniverses', kind: 'toggle', label: 'Universes', description: 'Include universe levels in names and types.', 'defaultBool?': false, leanOption: 'pp.universes' }
+      { id: 'ppLetVarTypes', kind: 'toggle', label: 'LCNF let var types', description: 'Include type annotations on let bindings.', 'defaultBool': false, leanOption: 'pp.letVarTypes' },
+      { id: 'ppFunBinderTypes', kind: 'toggle', label: 'LCNF binder types', description: 'Include type annotations on function parameters.', 'defaultBool': false, leanOption: 'pp.funBinderTypes' },
+      { id: 'ppExplicit', kind: 'toggle', label: 'Explicit arguments', description: 'Show implicit arguments when available.', 'defaultBool': false, leanOption: 'pp.explicit' },
+      { id: 'ppAll', kind: 'toggle', label: 'All details', description: 'Include extra details in printed terms.', 'defaultBool': false, leanOption: 'pp.all' },
+      { id: 'ppFullNames', kind: 'toggle', label: 'Full names', description: 'Avoid abbreviated names in output.', 'defaultBool': false, leanOption: 'pp.fullNames' },
+      { id: 'ppPrivateNames', kind: 'toggle', label: 'Private names', description: 'Display private/internal names explicitly.', 'defaultBool': false, leanOption: 'pp.privateNames' },
+      { id: 'ppUniverses', kind: 'toggle', label: 'Universes', description: 'Include universe levels in names and types.', 'defaultBool': false, leanOption: 'pp.universes' }
     ],
     compiler: [
-      { id: 'explicitRc', kind: 'toggle', label: 'IR explicit RC', description: 'Inspect pre reset/reuse-expansion IR.', 'defaultBool?': false, leanOption: 'compiler.reuse' },
-      { id: 'compilerExtractClosed', kind: 'toggle', label: 'Extract closed terms', description: 'Cache/evaluate closed terms at initialization.', 'defaultBool?': true, leanOption: 'compiler.extract_closed' },
-      { id: 'compilerCheck', kind: 'toggle', label: 'Compiler step check', description: 'Type-check code after compiler steps (debug).', 'defaultBool?': false, leanOption: 'compiler.check' },
-      { id: 'compilerCheckTypes', kind: 'toggle', label: 'LCNF type check', description: 'Check type compatibility after LCNF passes (debug).', 'defaultBool?': false, leanOption: 'compiler.checkTypes' },
-      { id: 'compilerSmall', kind: 'natChoice', label: 'small', description: 'Inline threshold for tiny declarations.', 'defaultNat?': 1, natChoices: [0, 1, 2, 4, 8], leanOption: 'compiler.small' },
-      { id: 'compilerMaxRecInline', kind: 'natChoice', label: 'maxRecInline', description: 'Max recursive inlining for [inline].', 'defaultNat?': 1, natChoices: [1, 2, 4, 8, 16], leanOption: 'compiler.maxRecInline' },
-      { id: 'compilerMaxRecInlineIfReduce', kind: 'natChoice', label: 'maxRecInlineIfReduce', description: 'Max recursive inlining for [inline_if_reduce].', 'defaultNat?': 16, natChoices: [8, 16, 32, 64], leanOption: 'compiler.maxRecInlineIfReduce' },
-      { id: 'compilerMaxRecSpecialize', kind: 'natChoice', label: 'maxRecSpecialize', description: 'Max recursive specialization depth.', 'defaultNat?': 64, natChoices: [16, 32, 64, 128, 256], leanOption: 'compiler.maxRecSpecialize' }
+      { id: 'explicitRc', kind: 'toggle', label: 'IR explicit RC', description: 'Inspect pre reset/reuse-expansion IR.', 'defaultBool': false, leanOption: 'compiler.reuse' },
+      { id: 'compilerExtractClosed', kind: 'toggle', label: 'Extract closed terms', description: 'Cache/evaluate closed terms at initialization.', 'defaultBool': true, leanOption: 'compiler.extract_closed' },
+      { id: 'compilerCheck', kind: 'toggle', label: 'Compiler step check', description: 'Type-check code after compiler steps (debug).', 'defaultBool': false, leanOption: 'compiler.check' },
+      { id: 'compilerCheckTypes', kind: 'toggle', label: 'LCNF type check', description: 'Check type compatibility after LCNF passes (debug).', 'defaultBool': false, leanOption: 'compiler.checkTypes' },
+      { id: 'compilerSmall', kind: 'natChoice', label: 'small', description: 'Inline threshold for tiny declarations.', 'defaultNat': 1, natChoices: [0, 1, 2, 4, 8], leanOption: 'compiler.small' },
+      { id: 'compilerMaxRecInline', kind: 'natChoice', label: 'maxRecInline', description: 'Max recursive inlining for [inline].', 'defaultNat': 1, natChoices: [1, 2, 4, 8, 16], leanOption: 'compiler.maxRecInline' },
+      { id: 'compilerMaxRecInlineIfReduce', kind: 'natChoice', label: 'maxRecInlineIfReduce', description: 'Max recursive inlining for [inline_if_reduce].', 'defaultNat': 16, natChoices: [8, 16, 32, 64], leanOption: 'compiler.maxRecInlineIfReduce' },
+      { id: 'compilerMaxRecSpecialize', kind: 'natChoice', label: 'maxRecSpecialize', description: 'Max recursive specialization depth.', 'defaultNat': 64, natChoices: [16, 32, 64, 128, 256], leanOption: 'compiler.maxRecSpecialize' }
     ]
   }), [])
 
@@ -329,17 +355,17 @@ export default function ClickPositionWidget(props) {
     for (const d of allDescriptors) {
       if (!d || typeof d !== 'object' || typeof d.id !== 'string') continue
       if (d.kind === 'toggle') {
-        out[d.id] = !!d['defaultBool?']
+        out[d.id] = !!d['defaultBool']
       } else if (d.kind === 'natChoice') {
         const choices = Array.isArray(d.natChoices) ? d.natChoices.map((n) => Number(n)).filter(Number.isFinite) : []
-        const def = Number.isFinite(Number(d['defaultNat?'])) ? Number(d['defaultNat?']) : (choices.length > 0 ? choices[0] : 0)
+        const def = Number.isFinite(Number(d['defaultNat'])) ? Number(d['defaultNat']) : (choices.length > 0 ? choices[0] : 0)
         out[d.id] = def
       }
     }
     return out
   }, [allDescriptors])
 
-  const [optionValues, setOptionValues] = React.useState({
+  const [optionValues, setOptionValues, resetOptionValues] = usePanelSettings({
     explicitRc: false,
     ppLetVarTypes: false,
     ppFunBinderTypes: false,
@@ -354,7 +380,10 @@ export default function ClickPositionWidget(props) {
     compilerSmall: 1,
     compilerMaxRecInline: 1,
     compilerMaxRecInlineIfReduce: 16,
-    compilerMaxRecSpecialize: 64
+    compilerMaxRecSpecialize: 64,
+    ...descriptorDefaults,
+    ...(props?.display || {}),
+    ...(props?.compiler || {})
   })
 
   React.useEffect(() => {
@@ -397,8 +426,8 @@ export default function ClickPositionWidget(props) {
   const compilerMaxRecInlineIfReduce = getNat('compilerMaxRecInlineIfReduce', 16)
   const compilerMaxRecSpecialize = getNat('compilerMaxRecSpecialize', 64)
 
-  const irState = useAsync(async () => {
-    if (!props?.pos) return undefined
+  const liveIRState = useAsync(async () => {
+    if (control.pinned || !props?.pos) return undefined
     const params = {
       pos: props.pos,
       forceRecompile,
@@ -426,6 +455,8 @@ export default function ClickPositionWidget(props) {
     return await rs.call('DevWidgets.CE.irAtPos', params)
   }, [
     rs,
+    control.pinned,
+    control.revision,
     props?.pos?.uri,
     props?.pos?.line,
     props?.pos?.character,
@@ -447,6 +478,7 @@ export default function ClickPositionWidget(props) {
     compilerMaxRecInlineIfReduce,
     compilerMaxRecSpecialize
   ])
+  const irState = control.view(liveIRState)
 
   const c = {
     border: 'var(--vscode-editorWidget-border, #555)',
@@ -627,8 +659,8 @@ export default function ClickPositionWidget(props) {
       const choices = Array.isArray(desc.natChoices)
         ? desc.natChoices.map((n) => Number(n)).filter(Number.isFinite)
         : []
-      const fallback = Number.isFinite(Number(desc['defaultNat?']))
-        ? Number(desc['defaultNat?'])
+      const fallback = Number.isFinite(Number(desc['defaultNat']))
+        ? Number(desc['defaultNat'])
         : (choices.length > 0 ? choices[0] : 0)
       return renderSelectOption(
         title,
@@ -642,7 +674,7 @@ export default function ClickPositionWidget(props) {
     return renderOptionToggle(
       title,
       hint,
-      getBool(desc.id, !!desc['defaultBool?']),
+      getBool(desc.id, !!desc['defaultBool']),
       (v) => setOption(desc.id, !!v),
       tooltip
     )
@@ -663,24 +695,16 @@ export default function ClickPositionWidget(props) {
   }
 
   const setVerbosePreset = () => {
+    setShowAdvanced(true)
     setOptionValues((prev) => ({
       ...prev,
-      ...descriptorDefaults,
-      explicitRc: true,
       ppLetVarTypes: true,
       ppFunBinderTypes: true,
       ppExplicit: true,
       ppAll: true,
       ppFullNames: true,
       ppPrivateNames: true,
-      ppUniverses: true,
-      compilerExtractClosed: true,
-      compilerCheck: false,
-      compilerCheckTypes: false,
-      compilerSmall: 2,
-      compilerMaxRecInline: 2,
-      compilerMaxRecInlineIfReduce: 32,
-      compilerMaxRecSpecialize: 128
+      ppUniverses: true
     }))
   }
 
@@ -792,10 +816,11 @@ export default function ClickPositionWidget(props) {
             : null
         ),
         React.createElement(
-          'div',
+          'fieldset',
           {
+            disabled: control.pinned,
             style: {
-              ...optionsCardStyle
+              ...optionsCardStyle, minWidth: 0
             }
           },
           React.createElement(
@@ -887,7 +912,8 @@ export default function ClickPositionWidget(props) {
       `IR check failed: ${mapRpcError(irState.error).message}`
     )
   } else {
-    content = React.createElement('div', { style: { marginTop: '0.5rem', color: c.muted } }, 'Checking code at cursor...')
+    content = React.createElement('div', { style: { marginTop: '0.5rem', color: c.muted } },
+      control.pos ? 'Checking code at cursor...' : 'Move the cursor over a declaration to inspect compiler output.')
   }
 
   return React.createElement(
@@ -910,13 +936,15 @@ export default function ClickPositionWidget(props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.5rem',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))'
         }
       },
       React.createElement('div', { style: { fontWeight: 700, letterSpacing: '0.02em', color: c.fg } }, 'Compiler Explorer'),
       React.createElement(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: '0.75rem' } },
+        { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem' } },
         React.createElement('div', { style: { fontSize: '0.82em', color: c.muted } }, 'IR and LCNF at cursor'),
         React.createElement(
           'label',
@@ -935,6 +963,7 @@ export default function ClickPositionWidget(props) {
           React.createElement('input', {
             type: 'checkbox',
             checked: forceRecompile,
+            disabled: control.pinned,
             onChange: (e) => setForceRecompile(!!e.target.checked)
           }),
           'Force recompilation'
@@ -956,6 +985,7 @@ export default function ClickPositionWidget(props) {
           React.createElement('input', {
             type: 'checkbox',
             checked: lcnfRecompileViaPipeline,
+            disabled: control.pinned,
             onChange: (e) => setLcnfRecompileViaPipeline(!!e.target.checked)
           }),
           'LCNF cache-like pipeline'
@@ -965,6 +995,14 @@ export default function ClickPositionWidget(props) {
     React.createElement(
       'div',
       { style: { padding: '0.65rem' } },
+      cursorToolbar(control, irState, () => {
+        resetOptionValues()
+        setShowAdvanced(props?.showAdvanced === true)
+        setForceRecompile(false)
+        setLcnfRecompileViaPipeline(props?.lcnfRecompileViaPipeline !== false)
+        setIrFoldState({})
+        setLcnfFoldState({})
+      }),
       content
     ),
     React.createElement(

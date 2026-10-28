@@ -3,7 +3,7 @@
 ## Repository Context
 
 This repository (`dev-widgets`) provides Lean 4 developer-focused InfoView widgets.
-Current target toolchain is `leanprover/lean4:v4.29.0-rc3` (see `lean-toolchain`).
+Current target toolchain is `leanprover/lean4:v4.36.0-rc2` (see `lean-toolchain`).
 
 Main modules:
 - `DevWidgets.CE`: compiler exploration panel (IR/LCNF + options).
@@ -25,6 +25,7 @@ Useful example entry points:
 - `examples/InfoViewExplorer.lean`
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
+- `examples/Configuration.lean`
 
 ## Development Workflow
 
@@ -37,6 +38,9 @@ Run all tests:
 ```bash
 lake test
 ```
+
+Tests require Node.js 22 or later on `PATH` for the widget JavaScript runtime
+suite; no npm install is needed.
 
 Run important regression checks explicitly:
 ```bash
@@ -70,6 +74,9 @@ When touching specific areas, also run focused checks:
 - CE schema/RPC surface: `lake env lean tests/CE/RpcAndSchema.lean`
 - PTracker RPC surface: `lake env lean tests/PTracker/RpcContracts.lean`
 - Lib resource helpers: `lake env lean tests/Lib/Resource.lean`
+- Widget JavaScript/RPC payloads: `lake env lean tests/Widget/Runtime.lean`
+- Real Lean-server activation/RPC integration: `lake env lean tests/Widget/Server.lean`
+- Activation/configuration: `lake env lean tests/Widget/Activation.lean` and `lake env lean tests/Widget/DefaultActivation.lean`
 
 PR hygiene expectations:
 - Keep changes scoped to one widget or one cross-cutting concern when possible.

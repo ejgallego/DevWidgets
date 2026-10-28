@@ -15,6 +15,8 @@ public import DevWidgets.Lib.AtPos
 public import DevWidgets.DocString.Markdown
 public import DevWidgets.DocString.Verso
 meta import Lean.Widget.Commands
+public import DevWidgets.Lib.Panel
+public meta import DevWidgets.Lib.Panel
 public section
 
 namespace DevWidgets.DocString
@@ -241,7 +243,7 @@ private def docAtNames? (env : Environment) (candidates : List Name) :
       return some (declName, fmt, md?, html?)
   return none
 
-private def docAtPosImpl (params : DocAtPosParams) : RequestM (RequestTask DocAtPosResponse) := do
+def docAtPosImpl (params : DocAtPosParams) : RequestM (RequestTask DocAtPosResponse) := do
   DevWidgets.Lib.withSnapshotAtPos params.pos fun atPos => do
     let hoverPos := atPos.utf8Pos
     let snap := atPos.snap
@@ -304,12 +306,15 @@ private def docAtPosImpl (params : DocAtPosParams) : RequestM (RequestTask DocAt
       message := msg
     }
 
-@[implemented_by docAtPosImpl]
-meta opaque docAtPos (params : DocAtPosParams) : RequestM (RequestTask DocAtPosResponse)
+/-- Initial documentation panel settings; height is in pixels. -/
+structure Config where
+  maxHeight : Nat := 288
+  deriving ToJson, FromJson
 
-attribute [server_rpc_method] docAtPos
+/-- A taller panel for reading longer documentation. -/
+def Config.expanded : Config := { maxHeight := 640 }
 
-def widgetJs : String := r#"
+def widgetJs : String := DevWidgets.Lib.Panel.javascript ++ r#"
 import * as React from 'react'
 import { useAsync, useRpcSession, mapRpcError } from '@leanprover/infoview'
 
@@ -376,7 +381,8 @@ function formatLabel(fmt) {
 
 export default function DocStringWidget(props) {
   const rs = useRpcSession()
-  const current = fmtPos(props?.pos)
+  const control = useCursorControls(props?.pos)
+  const current = fmtPos(control.pos)
   const hasPos = !!props?.pos
   const [markedApi, setMarkedApi] = React.useState(null)
 
@@ -392,11 +398,12 @@ export default function DocStringWidget(props) {
     return () => { cancelled = true }
   }, [])
 
-  const docState = useAsync(async () => {
-    if (!props?.pos) return undefined
+  const liveDocState = useAsync(async () => {
+    if (control.pinned || !props?.pos) return undefined
     const params = { pos: props.pos }
     return await rs.call('DevWidgets.DocString.docAtPos', params)
-  }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character])
+  }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character, control.pinned, control.revision])
+  const docState = control.view(liveDocState)
 
   const c = {
     border: 'var(--vscode-editorWidget-border, #555)',
@@ -478,7 +485,7 @@ export default function DocStringWidget(props) {
       }
     },
     React.createElement('div', { style: { fontWeight: 700, letterSpacing: '0.02em', color: c.fg } }, 'DocString'),
-    React.createElement('div', { style: { fontSize: '0.82em', color: c.muted } }, 'Rendered HTML')
+    React.createElement('div', { style: { fontSize: '0.82em', color: c.muted } }, 'Markdown · Verso')
   )
 
   let body
@@ -509,7 +516,7 @@ export default function DocStringWidget(props) {
             borderRadius: '6px',
             border: `1px solid ${c.border}`,
             background: c.panel,
-            maxHeight: '18rem',
+            maxHeight: `${boundedNat(props?.maxHeight, 288, 120, 1600)}px`,
             overflow: 'auto',
             color: c.fg,
             fontSize: '12px',
@@ -550,7 +557,7 @@ export default function DocStringWidget(props) {
 
   return React.createElement(
     'div',
-    panelStyle,
+    { style: panelStyle },
     header,
     React.createElement(
       'style',
@@ -627,7 +634,7 @@ export default function DocStringWidget(props) {
       }
       `
     ),
-    React.createElement('div', { style: { padding: '0.65rem' } }, body),
+    React.createElement('div', { style: { padding: '0.65rem' } }, cursorToolbar(control, docState), body),
     footer
   )
 }
