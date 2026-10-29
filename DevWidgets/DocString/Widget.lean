@@ -12,7 +12,6 @@ public import Lean.Server.Rpc.RequestHandling
 public import Lean.DocString
 public import Lean.Elab.DocString.Builtin
 public import DevWidgets.Lib.AtPos
-public import DevWidgets.DocString.Markdown
 public import DevWidgets.DocString.Verso
 meta import Lean.Widget.Commands
 public import DevWidgets.Lib.Panel
@@ -130,7 +129,7 @@ private def extractDocCommentPreview?
     let startPos ← body.getPos? (canonicalOnly := true)
     let endPos ← body.getTailPos? (canonicalOnly := true)
     let text := String.Pos.Raw.extract source startPos (endPos.unoffsetBy ⟨2⟩)
-    let fmt := if isVersoCommentBodyKind body.getKind then versoPreviewDocFormat else markdownPreviewDocFormat
+    let fmt := if isVersoCommentBodyKind body.getKind then versoPreviewDocFormat else "markdown-preview"
     some (fmt, text.removeLeadingSpaces)
   | _ => none
 
@@ -224,7 +223,7 @@ open Server RequestM
 private def docAtNameCore? (env : Environment) (declName : Name) :
     IO (Option (String × Option String × Option String)) := do
   match (← findInternalDocString? env declName) with
-  | some (.inl md) => pure (some (markdownDocFormat, some (renderMarkdownDoc md), none))
+  | some (.inl md) => pure (some ("markdown", some md, none))
   | some (.inr verso) => pure (some (versoDocFormat, none, some (renderVersoDocHtml verso)))
   | none => pure none
 
@@ -316,56 +315,12 @@ def Config.expanded : Config := { maxHeight := 640 }
 
 def widgetJs : String := DevWidgets.Lib.Panel.javascript ++ r#"
 import * as React from 'react'
-import { useAsync, useRpcSession, mapRpcError } from '@leanprover/infoview'
-
-const MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js'
+import { useAsync, useRpcSession, mapRpcError, Markdown } from '@leanprover/infoview'
 
 function fmtPos(pos) {
   if (!pos) return 'unknown'
   const file = typeof pos.uri === 'string' ? pos.uri.split('/').pop() : '<file>'
   return `${file}:${pos.line + 1}:${pos.character + 1}`
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function loadMarkedFromCdn() {
-  if (typeof window === 'undefined') return Promise.resolve(null)
-  if (window.marked && typeof window.marked.parse === 'function') {
-    return Promise.resolve(window.marked)
-  }
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-docstring-marked="1"]')
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.marked || null), { once: true })
-      existing.addEventListener('error', () => reject(new Error('Failed to load marked.js')), { once: true })
-      return
-    }
-    const script = document.createElement('script')
-    script.src = MARKED_CDN
-    script.async = true
-    script.dataset.docstringMarked = '1'
-    script.onload = () => resolve(window.marked || null)
-    script.onerror = () => reject(new Error('Failed to load marked.js'))
-    document.head.appendChild(script)
-  })
-}
-
-function fallbackMarkdownHtml(rawDoc) {
-  return `<pre><code>${escapeHtml(rawDoc)}</code></pre>`
-}
-
-function formatTone(fmt) {
-  if (fmt === 'verso' || fmt === 'verso-preview') return 'verso'
-  if (fmt === 'markdown' || fmt === 'markdown-preview') return 'markdown'
-  if (fmt === 'none') return 'none'
-  return 'other'
 }
 
 function formatLabel(fmt) {
@@ -384,20 +339,6 @@ export default function DocStringWidget(props) {
   const control = useCursorControls(props?.pos)
   const current = fmtPos(control.pos)
   const hasPos = !!props?.pos
-  const [markedApi, setMarkedApi] = React.useState(null)
-
-  React.useEffect(() => {
-    let cancelled = false
-    loadMarkedFromCdn()
-      .then((api) => {
-        if (!cancelled) setMarkedApi(api)
-      })
-      .catch(() => {
-        if (!cancelled) setMarkedApi(null)
-      })
-    return () => { cancelled = true }
-  }, [])
-
   const liveDocState = useAsync(async () => {
     if (control.pinned || !props?.pos) return undefined
     const params = { pos: props.pos }
@@ -414,34 +355,17 @@ export default function DocStringWidget(props) {
     err: 'var(--vscode-errorForeground, #f14c4c)'
   }
 
-  const renderedHtml = React.useMemo(() => {
-    if (!(docState.state === 'resolved' && docState.value)) return ''
-    const fmt = String(docState.value.docFormat || 'none')
-    const rawDoc = typeof docState.value.doc === 'string' ? docState.value.doc : ''
-    const versoHtml = typeof docState.value.docHtml === 'string' ? docState.value.docHtml : ''
-    if (fmt === 'verso') {
-      return versoHtml === '' ? '<p>(no rendered Verso doc)</p>' : versoHtml
+  // Markdown uses the same bundled renderer and HTML policy as InfoView hover docs.
+  // Only our escaped, URL-filtered Verso renderer supplies HTML.
+  const renderedDoc = React.useMemo(() => {
+    if (!(docState.state === 'resolved' && docState.value)) return null
+    if (docState.value.docFormat === 'verso') {
+      return React.createElement('div', {
+        dangerouslySetInnerHTML: { __html: docState.value.docHtml || '<p>(no rendered Verso doc)</p>' }
+      })
     }
-    if (fmt === 'markdown') {
-      if (rawDoc === '') return '<p>(no docstring)</p>'
-      if (markedApi && typeof markedApi.parse === 'function') {
-        try {
-          return markedApi.parse(rawDoc)
-        } catch (_err) {
-          return fallbackMarkdownHtml(rawDoc)
-        }
-      }
-      return fallbackMarkdownHtml(rawDoc)
-    }
-    if (rawDoc !== '' && markedApi && typeof markedApi.parse === 'function') {
-      try {
-        return markedApi.parse(rawDoc)
-      } catch (_err) {
-        return fallbackMarkdownHtml(rawDoc)
-      }
-    }
-    return rawDoc === '' ? '<p>(no docstring)</p>' : fallbackMarkdownHtml(rawDoc)
-  }, [docState, markedApi])
+    return React.createElement(Markdown, { contents: docState.value.doc || '(no docstring)' })
+  }, [docState])
 
   const panelStyle = {
     border: `1px solid ${c.border}`,
@@ -451,26 +375,16 @@ export default function DocStringWidget(props) {
     background: c.bg
   }
 
-  const badgeStyle = (fmt) => {
-    const tone = formatTone(fmt)
-    const map = {
-      verso: { fg: '#4ec9b0', bg: 'rgba(78, 201, 176, 0.12)' },
-      markdown: { fg: '#d7ba7d', bg: 'rgba(215, 186, 125, 0.12)' },
-      none: { fg: c.muted, bg: 'rgba(255,255,255,0.06)' },
-      other: { fg: '#9cdcfe', bg: 'rgba(156, 220, 254, 0.12)' }
-    }
-    const colors = map[tone] || map.other
-    return {
+  const badgeStyle = {
       display: 'inline-block',
       padding: '0.08rem 0.45rem',
       borderRadius: '999px',
       border: `1px solid ${c.border}`,
-      color: colors.fg,
-      background: colors.bg,
+      color: c.fg,
+      background: c.panel,
       fontSize: '0.77em',
       fontWeight: 700,
       letterSpacing: '0.02em'
-    }
   }
 
   const header = React.createElement(
@@ -500,7 +414,7 @@ export default function DocStringWidget(props) {
       React.createElement(
         'div',
         { style: { marginBottom: '0.45rem' } },
-        React.createElement('span', { style: badgeStyle(docFormat) }, formatLabel(docFormat))
+        React.createElement('span', { className: 'docstring-format', style: badgeStyle }, formatLabel(docFormat))
       ),
       React.createElement(
         'div',
@@ -522,10 +436,9 @@ export default function DocStringWidget(props) {
             fontSize: '12px',
             lineHeight: '1.45'
           },
-          className: 'docstring-rendered',
-          dangerouslySetInnerHTML: { __html: renderedHtml }
+          className: 'docstring-rendered'
         },
-        null
+        renderedDoc
       )
     )
   } else if (docState.state === 'rejected') {

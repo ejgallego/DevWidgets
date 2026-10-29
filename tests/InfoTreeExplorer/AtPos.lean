@@ -9,10 +9,6 @@ private def assertContains (label haystack needle : String) : CoreM Unit := do
   unless haystack.contains needle do
     throwError m!"expected `{label}` to contain substring `{needle}`\n---\n{haystack}\n---"
 
-private def assertNotContains (label haystack needle : String) : CoreM Unit := do
-  if haystack.contains needle then
-    throwError m!"expected `{label}` to not contain substring `{needle}`\n---\n{haystack}\n---"
-
 private def parseSingleCommand (src : String) : CoreM (Syntax × MessageLog) := do
   let ictx := Parser.mkInputContext src "<infotree-test>"
   let env ← getEnv
@@ -32,17 +28,8 @@ private def parseSingleCommand (src : String) : CoreM (Syntax × MessageLog) := 
   let (cmd, _, msgs) := Parser.parseCommand ictx pmctx pstate cmdState.messages
   pure (cmd, msgs)
 
-/-!
-Regression test for the InfoTree explorer refactor:
-- frontend RPC must use `infoTreeAtPos` keyed by `props.pos` (cursor/click).
-- old polling endpoint must not be referenced anymore.
-- old `#infotree_explorer` command must remain unavailable.
--/
+-- The removed command must remain unavailable; runtime tests cover cursor RPC calls.
 #eval show CoreM Unit from do
-  let js := DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget.javascript
-  assertContains "infoTreeExplorerWidget.javascript" js "infoTreeAtPos"
-  assertContains "infoTreeExplorerWidget.javascript" js "props?.pos"
-  assertNotContains "infoTreeExplorerWidget.javascript" js "fetchInfoTreeSummary"
   let (legacyCmd, parseMsgs) ← parseSingleCommand "#infotree_explorer\n"
   unless legacyCmd.getKind == ``Lean.Parser.Command.eoi do
     throwError m!"expected parse fallback kind `Lean.Parser.Command.eoi`, got `{legacyCmd.getKind}`"

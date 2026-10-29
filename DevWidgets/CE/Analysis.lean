@@ -91,12 +91,6 @@ structure CEOptionDescriptor where
   natChoices : Array Nat := #[]
   deriving FromJson, ToJson
 
-/-- Canonical option representation pairing concrete value and descriptor metadata. -/
-structure CEOptionDecl (α : Type) where
-  value : α
-  schema : CEOptionDescriptor
-  deriving FromJson, ToJson
-
 structure CEOptionSchema where
   display : Array CEOptionDescriptor := #[]
   compiler : Array CEOptionDescriptor := #[]
@@ -105,7 +99,7 @@ structure CEOptionSchema where
 structure CEOptionSchemaParams where
   deriving FromJson, ToJson
 
-private def ceOptionSchemaValue : CEOptionSchema := {
+def ceOptionSchemaValue : CEOptionSchema := {
   display := #[
     {
       id := "ppLetVarTypes"
@@ -114,7 +108,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Include type annotations on let bindings."
       leanOption := `pp.letVarTypes
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppLetVarTypes
     },
     {
       id := "ppFunBinderTypes"
@@ -123,7 +117,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Include type annotations on function parameters."
       leanOption := `pp.funBinderTypes
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppFunBinderTypes
     },
     {
       id := "ppExplicit"
@@ -132,7 +126,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Show implicit arguments when available."
       leanOption := `pp.explicit
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppExplicit
     },
     {
       id := "ppAll"
@@ -141,7 +135,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Include extra details in printed terms."
       leanOption := `pp.all
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppAll
     },
     {
       id := "ppFullNames"
@@ -150,7 +144,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Avoid abbreviated names in output."
       leanOption := `pp.fullNames
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppFullNames
     },
     {
       id := "ppPrivateNames"
@@ -159,7 +153,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Display private/internal names explicitly."
       leanOption := `pp.privateNames
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppPrivateNames
     },
     {
       id := "ppUniverses"
@@ -168,7 +162,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Include universe levels in names and types."
       leanOption := `pp.universes
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CEDisplayOptions).ppUniverses
     }
   ]
   compiler := #[
@@ -179,7 +173,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Inspect pre reset/reuse-expansion IR."
       leanOption := `compiler.reuse
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CECompilerOptions).explicitRc
     },
     {
       id := "compilerExtractClosed"
@@ -188,7 +182,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Cache/evaluate closed terms at initialization."
       leanOption := `compiler.extract_closed
       kind := .toggle
-      defaultBool? := some true
+      defaultBool? := some ({} : CECompilerOptions).compilerExtractClosed
     },
     {
       id := "compilerCheck"
@@ -197,7 +191,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Type-check code after compiler steps (debug)."
       leanOption := `compiler.check
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CECompilerOptions).compilerCheck
     },
     {
       id := "compilerCheckTypes"
@@ -206,7 +200,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Check type compatibility after LCNF passes (debug)."
       leanOption := `compiler.checkTypes
       kind := .toggle
-      defaultBool? := some false
+      defaultBool? := some ({} : CECompilerOptions).compilerCheckTypes
     },
     {
       id := "compilerSmall"
@@ -215,7 +209,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Inline threshold for tiny declarations."
       leanOption := `compiler.small
       kind := .natChoice
-      defaultNat? := some 1
+      defaultNat? := some ({} : CECompilerOptions).compilerSmall
       natChoices := #[0, 1, 2, 4, 8]
     },
     {
@@ -225,7 +219,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Max recursive inlining for [inline]."
       leanOption := `compiler.maxRecInline
       kind := .natChoice
-      defaultNat? := some 1
+      defaultNat? := some ({} : CECompilerOptions).compilerMaxRecInline
       natChoices := #[1, 2, 4, 8, 16]
     },
     {
@@ -235,7 +229,7 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Max recursive inlining for [inline_if_reduce]."
       leanOption := `compiler.maxRecInlineIfReduce
       kind := .natChoice
-      defaultNat? := some 16
+      defaultNat? := some ({} : CECompilerOptions).compilerMaxRecInlineIfReduce
       natChoices := #[8, 16, 32, 64]
     },
     {
@@ -245,88 +239,17 @@ private def ceOptionSchemaValue : CEOptionSchema := {
       description := "Max recursive specialization depth."
       leanOption := `compiler.maxRecSpecialize
       kind := .natChoice
-      defaultNat? := some 64
+      defaultNat? := some ({} : CECompilerOptions).compilerMaxRecSpecialize
       natChoices := #[16, 32, 64, 128, 256]
     }
   ]
 }
 
-private def fallbackDescriptor (group id : String) : CEOptionDescriptor := {
-  id := id
-  group := group
-  label := id
-  description := ""
-  leanOption := .anonymous
-  kind := .toggle
-}
-
-private def findDescriptor (group : String) (descs : Array CEOptionDescriptor) (id : String) :
-    CEOptionDescriptor :=
-  (descs.find? (fun d => d.id == id)).getD (fallbackDescriptor group id)
-
-structure CEDisplayOptionDecls where
-  ppLetVarTypes : CEOptionDecl Bool
-  ppFunBinderTypes : CEOptionDecl Bool
-  ppExplicit : CEOptionDecl Bool
-  ppAll : CEOptionDecl Bool
-  ppFullNames : CEOptionDecl Bool
-  ppPrivateNames : CEOptionDecl Bool
-  ppUniverses : CEOptionDecl Bool
-  deriving FromJson, ToJson
-
-structure CECompilerOptionDecls where
-  explicitRc : CEOptionDecl Bool
-  compilerExtractClosed : CEOptionDecl Bool
-  compilerCheck : CEOptionDecl Bool
-  compilerCheckTypes : CEOptionDecl Bool
-  compilerSmall : CEOptionDecl Nat
-  compilerMaxRecInline : CEOptionDecl Nat
-  compilerMaxRecInlineIfReduce : CEOptionDecl Nat
-  compilerMaxRecSpecialize : CEOptionDecl Nat
-  deriving FromJson, ToJson
-
-namespace CEDisplayOptions
-
-/-- Canonical schema metadata for display options. -/
-def schema : Array CEOptionDescriptor := ceOptionSchemaValue.display
-
-def toDecls (opts : CEDisplayOptions) : CEDisplayOptionDecls := {
-  ppLetVarTypes := {
-    value := opts.ppLetVarTypes
-    schema := findDescriptor "display" schema "ppLetVarTypes"
-  }
-  ppFunBinderTypes := {
-    value := opts.ppFunBinderTypes
-    schema := findDescriptor "display" schema "ppFunBinderTypes"
-  }
-  ppExplicit := {
-    value := opts.ppExplicit
-    schema := findDescriptor "display" schema "ppExplicit"
-  }
-  ppAll := {
-    value := opts.ppAll
-    schema := findDescriptor "display" schema "ppAll"
-  }
-  ppFullNames := {
-    value := opts.ppFullNames
-    schema := findDescriptor "display" schema "ppFullNames"
-  }
-  ppPrivateNames := {
-    value := opts.ppPrivateNames
-    schema := findDescriptor "display" schema "ppPrivateNames"
-  }
-  ppUniverses := {
-    value := opts.ppUniverses
-    schema := findDescriptor "display" schema "ppUniverses"
-  }
-}
-
-end CEDisplayOptions
+/-- Static metadata shared by the RPC and embedded frontend. -/
+def CEDisplayOptions.schema : Array CEOptionDescriptor := ceOptionSchemaValue.display
+def CECompilerOptions.schema : Array CEOptionDescriptor := ceOptionSchemaValue.compiler
 
 namespace CECompilerOptions
-
-/-- Canonical schema metadata for compiler options. -/
-def schema : Array CEOptionDescriptor := ceOptionSchemaValue.compiler
 
 /-- Read compiler option values from the current elaboration/context options. -/
 def fromOptions (opts : Options) : CECompilerOptions := {
@@ -338,41 +261,6 @@ def fromOptions (opts : Options) : CECompilerOptions := {
   compilerMaxRecInline := opts.get `compiler.maxRecInline 1
   compilerMaxRecInlineIfReduce := opts.get `compiler.maxRecInlineIfReduce 16
   compilerMaxRecSpecialize := opts.get `compiler.maxRecSpecialize 64
-}
-
-def toDecls (opts : CECompilerOptions) : CECompilerOptionDecls := {
-  explicitRc := {
-    value := opts.explicitRc
-    schema := findDescriptor "compiler" schema "explicitRc"
-  }
-  compilerExtractClosed := {
-    value := opts.compilerExtractClosed
-    schema := findDescriptor "compiler" schema "compilerExtractClosed"
-  }
-  compilerCheck := {
-    value := opts.compilerCheck
-    schema := findDescriptor "compiler" schema "compilerCheck"
-  }
-  compilerCheckTypes := {
-    value := opts.compilerCheckTypes
-    schema := findDescriptor "compiler" schema "compilerCheckTypes"
-  }
-  compilerSmall := {
-    value := opts.compilerSmall
-    schema := findDescriptor "compiler" schema "compilerSmall"
-  }
-  compilerMaxRecInline := {
-    value := opts.compilerMaxRecInline
-    schema := findDescriptor "compiler" schema "compilerMaxRecInline"
-  }
-  compilerMaxRecInlineIfReduce := {
-    value := opts.compilerMaxRecInlineIfReduce
-    schema := findDescriptor "compiler" schema "compilerMaxRecInlineIfReduce"
-  }
-  compilerMaxRecSpecialize := {
-    value := opts.compilerMaxRecSpecialize
-    schema := findDescriptor "compiler" schema "compilerMaxRecSpecialize"
-  }
 }
 
 end CECompilerOptions
@@ -411,9 +299,9 @@ inductive CECodeOrigin where
 /-- Options known to be used for this code representation. -/
 structure CECodeOptions where
   /-- Pretty-printer options used to render this payload, when applicable. -/
-  display? : Option CEDisplayOptionDecls := none
+  display? : Option CEDisplayOptions := none
   /-- Compiler options used to generate this payload, when applicable. -/
-  compiler? : Option CECompilerOptionDecls := none
+  compiler? : Option CECompilerOptions := none
   deriving FromJson, ToJson
 
 /-- Explicit reasons for unavailability instead of plain `Option.none`. -/
@@ -458,20 +346,26 @@ def reasonLabel : CECodeUnavailableReason → String
 
 end CECodeResult
 
+/-- A compiler option change, independent of its presentation. -/
+structure CEOptionDiff where
+  id : String
+  requested : Json
+  context : Json
+  deriving FromJson, ToJson
+
 /-- Full analysis payload when a declaration exists under cursor. -/
 structure CEDeclAnalysis where
   /-- Declaration selected for analysis (after helper fallback, if any). -/
   declName : Name
   /-- Raw declaration name from cursor hover info. -/
   cursorDeclName : Name
-  /-- Whether the compiler considers this declaration code-generatable. -/
-  hasIR : Bool
   ir : CECodeResult
   lcnf : CECodeResult
   /-- Compiler options that differ from cursor context and triggered recompilation. -/
-  recompileOptionDiffs : Array String := #[]
+  recompileOptionDiffs : Array CEOptionDiff := #[]
   usedHelperFallback : Bool := false
-  debugInfo : Array String := #[]
+  forceRecompileRequested : Bool := false
+  shouldGenerateError? : Option String := none
   deriving FromJson, ToJson
 
 /-- RPC response is a sum type: either no declaration at cursor, or declaration analysis. -/
@@ -487,63 +381,60 @@ private def mayCompileToCode (ci : ConstantInfo) : Bool :=
   | .defnInfo _ | .opaqueInfo _ | .ctorInfo _ | .recInfo _ => true
   | _ => false
 
-structure CEAnalysisConfig where
-  display : CEDisplayOptionDecls
-  compiler : CECompilerOptionDecls
+private structure CEAnalysisConfig where
+  display : CEDisplayOptions
+  compiler : CECompilerOptions
   /-- Compiler options active in the cursor context (`info.ctx.options`). -/
-  compilerContext : CECompilerOptionDecls
+  compilerContext : CECompilerOptions
   /-- Force recompilation independently of compiler option diffs. -/
   forceRecompileRequested : Bool := false
   /-- CE-only switch selecting cache-like vs direct LCNF reconstruction on recompile. -/
   lcnfRecompileViaPipeline : Bool := true
 
-private def optionDiff [BEq α] [ToString α] (requested context : CEOptionDecl α) : Option String :=
-  if requested.value == context.value then
-    none
-  else
-    some s!"{requested.schema.id}: requested={requested.value}, context={context.value}"
+private def optionDiff [BEq α] [ToJson α] (id : String) (requested context : α) : Option CEOptionDiff :=
+  if requested == context then none else some { id, requested := toJson requested, context := toJson context }
 
-private def compilerOptionDiffs (requested context : CECompilerOptionDecls) : Array String :=
+private def compilerOptionDiffs (requested context : CECompilerOptions) : Array CEOptionDiff :=
   #[
-    optionDiff requested.explicitRc context.explicitRc,
-    optionDiff requested.compilerExtractClosed context.compilerExtractClosed,
-    optionDiff requested.compilerCheck context.compilerCheck,
-    optionDiff requested.compilerCheckTypes context.compilerCheckTypes,
-    optionDiff requested.compilerSmall context.compilerSmall,
-    optionDiff requested.compilerMaxRecInline context.compilerMaxRecInline,
-    optionDiff requested.compilerMaxRecInlineIfReduce context.compilerMaxRecInlineIfReduce,
-    optionDiff requested.compilerMaxRecSpecialize context.compilerMaxRecSpecialize
+    optionDiff "explicitRc" requested.explicitRc context.explicitRc,
+    optionDiff "compilerExtractClosed" requested.compilerExtractClosed context.compilerExtractClosed,
+    optionDiff "compilerCheck" requested.compilerCheck context.compilerCheck,
+    optionDiff "compilerCheckTypes" requested.compilerCheckTypes context.compilerCheckTypes,
+    optionDiff "compilerSmall" requested.compilerSmall context.compilerSmall,
+    optionDiff "compilerMaxRecInline" requested.compilerMaxRecInline context.compilerMaxRecInline,
+    optionDiff "compilerMaxRecInlineIfReduce" requested.compilerMaxRecInlineIfReduce context.compilerMaxRecInlineIfReduce,
+    optionDiff "compilerMaxRecSpecialize" requested.compilerMaxRecSpecialize context.compilerMaxRecSpecialize
   ].filterMap id
 
-private def withDisplayOptions (display : CEDisplayOptionDecls) (x : CoreM α) : CoreM α := do
+private def withDisplayOptions (display : CEDisplayOptions) (x : CoreM α) : CoreM α := do
   withOptions (fun opts =>
-    let opts := opts.set `pp.letVarTypes display.ppLetVarTypes.value
-    let opts := opts.set `pp.funBinderTypes display.ppFunBinderTypes.value
-    let opts := opts.set `pp.explicit display.ppExplicit.value
-    let opts := opts.set `pp.all display.ppAll.value
-    let opts := opts.set `pp.fullNames display.ppFullNames.value
-    let opts := opts.set `pp.privateNames display.ppPrivateNames.value
-    let opts := opts.set `pp.universes display.ppUniverses.value
+    let opts := opts.set `pp.letVarTypes display.ppLetVarTypes
+    let opts := opts.set `pp.funBinderTypes display.ppFunBinderTypes
+    let opts := opts.set `pp.explicit display.ppExplicit
+    let opts := opts.set `pp.all display.ppAll
+    let opts := opts.set `pp.fullNames display.ppFullNames
+    let opts := opts.set `pp.privateNames display.ppPrivateNames
+    let opts := opts.set `pp.universes display.ppUniverses
     opts
   ) x
 
-private def withCompilerOptions (compiler : CECompilerOptionDecls) (x : CoreM α) : CoreM α := do
+private def withCompilerOptions (compiler : CECompilerOptions) (x : CoreM α) : CoreM α := do
   withOptions (fun opts =>
-    let opts := opts.set `compiler.reuse (!compiler.explicitRc.value)
-    let opts := opts.set `compiler.extract_closed compiler.compilerExtractClosed.value
-    let opts := opts.set `compiler.check compiler.compilerCheck.value
-    let opts := opts.set `compiler.checkTypes compiler.compilerCheckTypes.value
-    let opts := opts.set `compiler.small compiler.compilerSmall.value
-    let opts := opts.set `compiler.maxRecInline compiler.compilerMaxRecInline.value
-    let opts := opts.set `compiler.maxRecInlineIfReduce compiler.compilerMaxRecInlineIfReduce.value
-    let opts := opts.set `compiler.maxRecSpecialize compiler.compilerMaxRecSpecialize.value
+    let opts := opts.set `compiler.reuse (!compiler.explicitRc)
+    let opts := opts.set `compiler.extract_closed compiler.compilerExtractClosed
+    let opts := opts.set `compiler.check compiler.compilerCheck
+    let opts := opts.set `compiler.checkTypes compiler.compilerCheckTypes
+    let opts := opts.set `compiler.small compiler.compilerSmall
+    let opts := opts.set `compiler.maxRecInline compiler.compilerMaxRecInline
+    let opts := opts.set `compiler.maxRecInlineIfReduce compiler.compilerMaxRecInlineIfReduce
+    let opts := opts.set `compiler.maxRecSpecialize compiler.compilerMaxRecSpecialize
     opts
   ) x
 
 /--
 `shouldGenerateCode` can throw for declarations missing expected compiler artifacts
 (for example, missing LCNF signatures in some recursive/brec cases). We catch here
-to keep CE resilient and expose details via `debugInfo` instead of failing RPC.
+to keep CE resilient and expose details via `shouldGenerateError?` instead of failing RPC.
 -/
 private def shouldGenerateCodeResult (declName : Name) : CoreM (Bool × Option String) := do
   try
@@ -554,7 +445,7 @@ private def shouldGenerateCodeResult (declName : Name) : CoreM (Bool × Option S
 private def irDeclToCodeRepr (decl : Lean.IR.Decl) : CECodeRepr :=
   .text (toString decl)
 
-private def lcnfDeclToCodeRepr (display : CEDisplayOptionDecls) {p} (decl : Lean.Compiler.LCNF.Decl p) :
+private def lcnfDeclToCodeRepr (display : CEDisplayOptions) {p} (decl : Lean.Compiler.LCNF.Decl p) :
     CoreM CECodeRepr := do
   let fmt ← withDisplayOptions display <| Lean.Compiler.LCNF.ppDecl' decl .base
   return .text fmt.pretty
@@ -571,7 +462,7 @@ private def getStoredIRCode (declName : Name) : CoreM CECodeResult := do
     return .available (irDeclToCodeRepr decl) .importedEnvironment {}
   return .unavailable .notFoundInEnvironment
 
-private def getStoredLCNFCode (display : CEDisplayOptionDecls) (declName : Name) : CoreM CECodeResult := do
+private def getStoredLCNFCode (display : CEDisplayOptions) (declName : Name) : CoreM CECodeResult := do
   try
     let localDecl? ← Lean.Compiler.LCNF.CompilerM.run <|
       Lean.Compiler.LCNF.getLocalDeclAt? declName .base
@@ -593,70 +484,60 @@ private def compileForInspection (declName : Name) : CoreM Unit :=
   withOptions (Lean.Compiler.compiler.postponeCompile.set · false) do
     Lean.Compiler.LCNF.main #[declName] (← getOptions)
 
-private def compileIRCode (compiler : CECompilerOptionDecls) (declName : Name)
-    (origin : CECodeOrigin) : CoreM CECodeResult := do
-  try
+/-- Compile once, then read both representations from that invocation's environment. -/
+private def compileCode (display : CEDisplayOptions) (compiler : CECompilerOptions)
+    (viaPipeline : Bool) (declName : Name) (irOrigin lcnfOrigin : CECodeOrigin) :
+    CoreM (CECodeResult × CECodeResult) := do
+  let pipeline ← try
     let before := (Lean.IR.getDecls (← getEnv)).length
     withCompilerOptions compiler <| compileForInspection declName
-    -- The compiler now publishes IR in the environment rather than returning SCCs.
-    -- Entries are newest first; retain only code emitted by this invocation.
     let allDecls := Lean.IR.getDecls (← getEnv)
-    let decls := (allDecls.take (allDecls.length - before)).reverse.toArray
-    if decls.isEmpty then
-      return .unavailable .compilationReturnedNoCode
-    let code := .lines (decls.map irDeclToCodeRepr)
-    return .available code origin { compiler? := some compiler }
-  catch e =>
-    return .unavailable (.compilationFailed (← e.toMessageData.toString))
-
-private def compileLCNFCode (display : CEDisplayOptionDecls) (compiler : CECompilerOptionDecls)
-    (recompileViaPipeline : Bool)
-    (declName : Name) (origin : CECodeOrigin) : CoreM CECodeResult := do
-  try
-    if recompileViaPipeline then
-      withCompilerOptions compiler <| compileForInspection declName
-      let localDecl? ← Lean.Compiler.LCNF.CompilerM.run do
-        let direct? ← Lean.Compiler.LCNF.getLocalDeclAt? declName .base
-        match direct? with
-        | some decl => pure (some decl)
-        | none => Lean.Compiler.LCNF.getLocalDeclAt? (declName ++ `_boxed) .base
-      let some decl := localDecl?
-        | return .unavailable .compilationReturnedNoCode
-      let code ← lcnfDeclToCodeRepr display decl
-      return .available code origin { display? := some display, compiler? := some compiler }
+    pure <| Except.ok (allDecls.take (allDecls.length - before)).reverse.toArray
+  catch e => pure <| Except.error (← e.toMessageData.toString)
+  let ir := match pipeline with
+    | .error err => .unavailable (.compilationFailed err)
+    | .ok decls =>
+      if decls.isEmpty then .unavailable .compilationReturnedNoCode
+      else .available (.lines (decls.map irDeclToCodeRepr)) irOrigin { compiler? := some compiler }
+  let lcnf ← try
+    if viaPipeline then
+      if let .error err := pipeline then
+        pure <| .unavailable (.compilationFailed err)
+      else
+        let localDecl? ← Lean.Compiler.LCNF.CompilerM.run do
+          let direct? ← Lean.Compiler.LCNF.getLocalDeclAt? declName .base
+          match direct? with
+          | some decl => pure (some decl)
+          | none => Lean.Compiler.LCNF.getLocalDeclAt? (declName ++ `_boxed) .base
+        match localDecl? with
+        | none => pure <| .unavailable .compilationReturnedNoCode
+        | some decl =>
+          let code ← lcnfDeclToCodeRepr display decl
+          pure <| .available code lcnfOrigin { display? := some display, compiler? := some compiler }
     else
       let decl ← withCompilerOptions compiler <| Lean.Compiler.LCNF.CompilerM.run <| Lean.Compiler.LCNF.toDecl declName
       let code ← lcnfDeclToCodeRepr display decl
-      return .available code origin { display? := some display, compiler? := some compiler }
-  catch e =>
-    return .unavailable (.compilationFailed (← e.toMessageData.toString))
+      pure <| .available code lcnfOrigin { display? := some display, compiler? := some compiler }
+  catch e => pure <| .unavailable (.compilationFailed (← e.toMessageData.toString))
+  return (ir, lcnf)
 
 namespace Testing
 
 /-- Exercise both recompilation paths, including when module compilation is postponed. -/
 def recompile (declName : Name) (viaPipeline : Bool := true) : CoreM (CECodeResult × CECodeResult) := do
   withEnv (← getEnv) do
-    let compiler := ({} : CECompilerOptions).toDecls
-    let display := ({} : CEDisplayOptions).toDecls
-    let ir ← compileIRCode compiler declName .recompiledForced
-    let lcnf ← compileLCNFCode display compiler viaPipeline declName .recompiledForced
-    return (ir, lcnf)
+    compileCode {} {} viaPipeline declName .recompiledForced .recompiledForced
 
 end Testing
 
 private structure AnalysisResult where
-  shouldGenerate : Bool := false
   shouldGenerateError? : Option String := none
-  forceRecompile : Bool := false
-  recompileOptionDiffs : Array String := #[]
+  recompileOptionDiffs : Array CEOptionDiff := #[]
   ir : CECodeResult := .unavailable .notCompilableConstant
   lcnf : CECodeResult := .unavailable .notCompilableConstant
 
 private def analysisHasAnyCode (a : AnalysisResult) : Bool :=
   a.ir.isAvailable || a.lcnf.isAvailable
-
-private def analysisHasIR (a : AnalysisResult) : Bool :=
-  analysisHasAnyCode a || a.shouldGenerate
 
 private def withShouldGenerateFallback (shouldGenerate : Bool) (code : CECodeResult) : CECodeResult :=
   if shouldGenerate then
@@ -691,46 +572,37 @@ private def analyzeDecl (cfg : CEAnalysisConfig) (declName : Name) : CoreM Analy
   let maybeCompilable := (env.find? declName).map mayCompileToCode |>.getD false
   if !maybeCompilable then
     return {
-      shouldGenerate := false
       ir := .unavailable .notCompilableConstant
       lcnf := .unavailable .notCompilableConstant
     }
 
   let (shouldGenerate, shouldGenerateError?) ← shouldGenerateCodeResult declName
 
-  let optionDiffs := compilerOptionDiffs cfg.compiler cfg.compilerContext
-  let mut recompileOptionDiffs := optionDiffs
-  if cfg.forceRecompileRequested then
-    recompileOptionDiffs := #["forced by header checkbox"] ++ recompileOptionDiffs
+  let recompileOptionDiffs := compilerOptionDiffs cfg.compiler cfg.compilerContext
   let forceRecompile := cfg.forceRecompileRequested || !recompileOptionDiffs.isEmpty
   let recompiledOrigin : CECodeOrigin :=
     if cfg.forceRecompileRequested then .recompiledForced else .recompiledDueToOptions
-
+  -- Capture both stored results before compilation mutates the inspection environment.
   let storedIR ← getStoredIRCode declName
-  let ir ←
-    if forceRecompile then
-      let origin := if storedIR.isAvailable then recompiledOrigin else .compiledFromScratchForced
-      compileIRCode cfg.compiler declName origin
-    else
-      match storedIR with
-      | .available .. => pure storedIR
-      | .unavailable _ => compileIRCode cfg.compiler declName .compiledFromScratch
-
   let storedLCNF ← getStoredLCNFCode cfg.display declName
-  let lcnf ←
+  let needsIR := forceRecompile || !storedIR.isAvailable
+  let needsLCNF := forceRecompile || !storedLCNF.isAvailable
+  let origin (stored : CECodeResult) :=
     if forceRecompile then
-      let origin := if storedLCNF.isAvailable then recompiledOrigin else .compiledFromScratchForced
-      compileLCNFCode cfg.display cfg.compiler cfg.lcnfRecompileViaPipeline declName origin
-    else
-      match storedLCNF with
-      | .available .. => pure storedLCNF
-      | .unavailable _ =>
-          compileLCNFCode cfg.display cfg.compiler cfg.lcnfRecompileViaPipeline declName .compiledFromScratch
+      if stored.isAvailable then recompiledOrigin else .compiledFromScratchForced
+    else .compiledFromScratch
+  let (compiledIR, compiledLCNF) ←
+    if needsIR || needsLCNF then
+      compileCode cfg.display cfg.compiler cfg.lcnfRecompileViaPipeline declName
+        (origin storedIR) (origin storedLCNF)
+    else pure (storedIR, storedLCNF)
+  let ir := if needsIR then compiledIR else storedIR
+  let lcnf := if needsLCNF then compiledLCNF else storedLCNF
 
   let ir := withShouldGenerateFallback shouldGenerate ir
   let lcnf := withShouldGenerateFallback shouldGenerate lcnf
 
-  return { shouldGenerate, shouldGenerateError?, forceRecompile, recompileOptionDiffs, ir, lcnf }
+  return { shouldGenerateError?, recompileOptionDiffs, ir, lcnf }
 
 private structure ResolvedDeclAnalysis where
   /-- Declaration ultimately used for analysis payload (`declName`). -/
@@ -757,50 +629,6 @@ private def resolveDeclAnalysis (cfg : CEAnalysisConfig) (declName : Name) :
     return { resolvedDeclName := parent, analysis := parentAnalysis, usedHelperFallback := true }
   return { resolvedDeclName := declName, analysis, usedHelperFallback := false }
 
-private def codeResultDebug (code : CECodeResult) : String :=
-  match code with
-  | .available _ origin opts =>
-    let originStr := match origin with
-      | .localEnvironment => "localEnvironment"
-      | .importedEnvironment => "importedEnvironment"
-      | .recompiledDueToOptions => "recompiledDueToOptions"
-      | .recompiledForced => "recompiledForced"
-      | .compiledFromScratch => "compiledFromScratch"
-      | .compiledFromScratchForced => "compiledFromScratchForced"
-    s!"available:{originStr}:display={opts.display?.isSome}:compiler={opts.compiler?.isSome}"
-  | .unavailable reason => s!"unavailable:{CECodeResult.reasonLabel reason}"
-
-private def mkDebugInfo (_params : IRAtPosParams)
-    (cursorDeclName resolvedDeclName : Name) (analysis : AnalysisResult) : Array String :=
-  let out := #[
-    s!"ir={codeResultDebug analysis.ir}",
-    s!"lcnf={codeResultDebug analysis.lcnf}"
-  ]
-  let out :=
-    if cursorDeclName != resolvedDeclName then
-      out.push s!"resolvedDecl={resolvedDeclName}"
-    else
-      out
-  let out :=
-    if analysis.forceRecompile then
-      out.push "forcedRecompile=true"
-    else
-      out
-  let out :=
-    if analysis.recompileOptionDiffs.isEmpty then
-      out
-    else
-      out ++ (analysis.recompileOptionDiffs.map (fun d => s!"recompileDiff={d}"))
-  let out := match analysis.ir with
-    | .unavailable (.compilationFailed err) => out.push s!"irCompileError={err}"
-    | _ => out
-  let out := match analysis.lcnf with
-    | .unavailable (.compilationFailed err) => out.push s!"lcnfCompileError={err}"
-    | _ => out
-  match analysis.shouldGenerateError? with
-  | some err => out.push s!"shouldGenerateError={err}"
-  | none => out
-
 open Server RequestM
 def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse) := do
   DevWidgets.Lib.withConstAtPos params.pos (global := false) fun constAt? => do
@@ -815,10 +643,10 @@ def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse
     -- so "recompiled due to options" is decided against the same context that
     -- produced the hovered declaration.
     let env := constAt.env
-    let ctxCompiler := CECompilerOptions.fromOptions constAt.info.ctx.options |>.toDecls
+    let ctxCompiler := CECompilerOptions.fromOptions constAt.info.ctx.options
     let cfg : CEAnalysisConfig := {
-      display := params.display.toDecls
-      compiler := params.compiler.toDecls
+      display := params.display
+      compiler := params.compiler
       compilerContext := ctxCompiler
       forceRecompileRequested := params.forceRecompile
       lcnfRecompileViaPipeline := params.lcnfRecompileViaPipeline
@@ -829,17 +657,16 @@ def irAtPosImpl (params : IRAtPosParams) : RequestM (RequestTask IRAtPosResponse
 
     let resolvedDeclName := resolved.resolvedDeclName
     let analysis := resolved.analysis
-    let debugInfo := mkDebugInfo params declName resolvedDeclName analysis
 
     return .declaration {
       declName := resolvedDeclName
       cursorDeclName := declName
-      hasIR := analysisHasIR analysis
       ir := analysis.ir
       lcnf := analysis.lcnf
       recompileOptionDiffs := analysis.recompileOptionDiffs
       usedHelperFallback := resolved.usedHelperFallback
-      debugInfo
+      forceRecompileRequested := params.forceRecompile
+      shouldGenerateError? := analysis.shouldGenerateError?
     }
 
 end DevWidgets.CE

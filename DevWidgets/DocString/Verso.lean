@@ -106,6 +106,14 @@ private def renderSpecialBlock? (container : ElabBlock) : Option String := do
   else
     none
 
+/-- Permit ordinary web/mail links, fragments and relative paths; reject executable schemes. -/
+def safeDocUrl (url : String) : Bool :=
+  let url := url.trimAscii.toString
+  let lower := url.toLower
+  !url.toList.any (fun c => c.toNat < 32 || c.toNat == 127) &&
+    (!url.contains ':' || lower.startsWith "https://" || lower.startsWith "http://" ||
+      lower.startsWith "mailto:")
+
 mutual
   private partial def renderInlineHtml (inl : Doc.Inline ElabInline) : String :=
     match inl with
@@ -117,11 +125,15 @@ mutual
     | .math .display s => s!"<div class=\"math-display\">{htmlEscape s}</div>"
     | .linebreak _ => " "
     | .link content url =>
-      s!"<a href=\"{htmlEscape url}\">{renderInlinesHtml content}</a>"
+      if safeDocUrl url then
+        s!"<a href=\"{htmlEscape url}\">{renderInlinesHtml content}</a>"
+      else renderInlinesHtml content
     | .footnote name content =>
       s!"<sup class=\"footnote-ref\">{htmlEscape name}</sup><span class=\"footnote-body\">{renderInlinesHtml content}</span>"
     | .image alt url =>
-      s!"<img alt=\"{htmlEscape alt}\" src=\"{htmlEscape url}\" />"
+      if safeDocUrl url then
+        s!"<img alt=\"{htmlEscape alt}\" src=\"{htmlEscape url}\" />"
+      else htmlEscape alt
     | .concat content => renderInlinesHtml content
     | .other container content =>
       let body := renderInlinesHtml content

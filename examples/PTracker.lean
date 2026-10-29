@@ -26,7 +26,7 @@ elab_rules : command
       let steps := steps.getNat
       let work := work.getNat
       let sleepMs := UInt32.ofNat sleepMs.getNat
-      withProgressRef (some steps) "main task" "starting main task" fun mainRef => do
+      withElabProgressRef (some steps) "main task" "starting main task" fun mainRef => do
         for i in [0:steps] do
           liftCoreM $ Lean.Core.checkInterrupted
           let _ ← burnWork work

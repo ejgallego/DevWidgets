@@ -46,10 +46,9 @@ structure DeleteProgressRefParams where
   deriving ToJson, FromJson
 
 @[server_rpc_method]
-meta def deleteProgressRefRpc (params : DeleteProgressRefParams) : RequestM (RequestTask Bool) :=
+meta def deleteProgressRefRpc (params : DeleteProgressRefParams) : RequestM (RequestTask Unit) :=
   RequestM.asTask do
     deleteProgressRef params.id
-    pure true
 
 @[widget_module]
 def progressWidget : Lean.Widget.Module where
@@ -73,7 +72,7 @@ export default function ProgressWidget(props) {
   const setAutoEnabled = (value) => setSettings((prev) => ({ ...prev, autoRefresh: value }));
   const setPeriodMs = (value) => setSettings((prev) => ({ ...prev, intervalMs: value }));
   // Requests and row IDs belong to one RPC session. A restarted worker may reuse IDs.
-  const session = React.useMemo(() => ({ inFlight: false, pendingDeleteIds: new Set() }), [rpc]);
+  const session = React.useMemo(() => ({ inFlight: false, pendingDeleteIds: new Set(), deletedDuringRead: new Set() }), [rpc]);
   const activeSession = React.useRef(null);
   const [snapshot, setSnapshot] = React.useState(null);
   const entries = snapshot?.session === session ? snapshot.entries : [];
@@ -132,24 +131,25 @@ export default function ProgressWidget(props) {
 
   function statusIcon(status) {
     if (status === 'done') return '✓';
-    if (status === 'cancelled') return '⨯';
+    if (status === 'cancelled' || status === 'failed') return '⨯';
     return '●';
   }
 
   function statusLabel(status) {
     if (status === 'done') return 'Done';
     if (status === 'cancelled') return 'Cancelled';
+    if (status === 'failed') return 'Failed';
     return 'Running';
   }
 
   function rowBackground(status) {
     if (status === 'done') return 'rgba(40, 167, 69, 0.10)';
-    if (status === 'cancelled') return 'rgba(220, 53, 69, 0.11)';
+    if (status === 'cancelled' || status === 'failed') return 'rgba(220, 53, 69, 0.11)';
     return 'transparent';
   }
 
   function isClosedStatus(status) {
-    return status === 'done' || status === 'cancelled';
+    return status === 'done' || status === 'cancelled' || status === 'failed';
   }
 
   function getRemainingMs(entry) {
@@ -248,6 +248,9 @@ export default function ProgressWidget(props) {
     try {
       await rpc.call('DevWidgets.PTracker.deleteProgressRefRpc', { id });
       if (activeSession.current !== session) return;
+      // Only retain tombstones for the one read that could predate this deletion.
+      if (session.inFlight) session.deletedDuringRead.add(id);
+      setError(null);
       setSnapshot((prev) => prev?.session === session
         ? { ...prev, entries: prev.entries.filter((entry) => Number(entry.id) !== id) }
         : prev);
@@ -266,7 +269,8 @@ export default function ProgressWidget(props) {
     try {
       const next = await rpc.call('DevWidgets.PTracker.readProgressViewRpc', {});
       if (activeSession.current !== session) return;
-      const nextEntries = Array.isArray(next?.entries) ? next.entries : [];
+      const nextEntries = (Array.isArray(next?.entries) ? next.entries : [])
+        .filter((entry) => !session.deletedDuringRead.has(Number(entry.id)));
       const nowNs = Number(next?.nowNs);
       setSnapshot({ session, entries: nextEntries, nowNs: Number.isFinite(nowNs) ? nowNs : 0, atMs: Date.now() });
     } catch (err) {
@@ -274,6 +278,7 @@ export default function ProgressWidget(props) {
     } finally {
       if (activeSession.current === session && origin === 'manual') setManualLoading(false);
       session.inFlight = false;
+      session.deletedDuringRead.clear();
     }
   }, [rpc, session]);
 

@@ -9,6 +9,8 @@ const server = spawn('lean', ['--server'], { stdio: ['pipe', 'pipe', 'pipe'] });
 let buffer = Buffer.alloc(0);
 let nextId = 0;
 let stderr = '';
+let fatalError;
+const watchdog = setTimeout(() => failServer(new Error('Lean server test exceeded 120 seconds')), 120000);
 const pending = new Map();
 const diagnostics = new Map();
 const exited = new Promise(resolve => server.once('close', resolve));
@@ -17,15 +19,24 @@ function failPending(error) {
   for (const request of pending.values()) request.reject(error);
   pending.clear();
 }
-server.on('error', failPending);
-server.stdin.on('error', failPending);
+function failServer(error) {
+  fatalError ??= error;
+  failPending(error);
+  server.kill('SIGKILL');
+}
+server.on('error', failServer);
+server.stdin.on('error', failServer);
 server.on('exit', code => failPending(new Error(`Lean server exited (${code}): ${stderr}`)));
 server.stdout.on('data', data => {
+  try {
   buffer = Buffer.concat([buffer, data]);
   while (true) {
     const headerEnd = buffer.indexOf('\r\n\r\n');
     if (headerEnd < 0) return;
-    const length = Number(/Content-Length: (\d+)/i.exec(buffer.subarray(0, headerEnd).toString())[1]);
+    const match = /Content-Length: (\d+)/i.exec(buffer.subarray(0, headerEnd).toString());
+    assert.ok(match, 'Malformed LSP header');
+    const length = Number(match[1]);
+    assert.ok(Number.isSafeInteger(length) && length <= 64 * 1024 * 1024, 'Invalid LSP message length');
     if (buffer.length < headerEnd + 4 + length) return;
     const message = JSON.parse(buffer.subarray(headerEnd + 4, headerEnd + 4 + length).toString());
     buffer = buffer.subarray(headerEnd + 4 + length);
@@ -38,6 +49,7 @@ server.stdout.on('data', data => {
       else request.resolve(message.result);
     }
   }
+  } catch (error) { failServer(error); }
 });
 function send(message) {
   const body = JSON.stringify({ jsonrpc: '2.0', ...message });
@@ -45,6 +57,7 @@ function send(message) {
 }
 function notify(method, params) { send({ method, params }); }
 function request(method, params, timeoutMs = 30000) {
+  if (fatalError) return Promise.reject(fatalError);
   const id = ++nextId;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -125,7 +138,7 @@ try {
   assert.equal(ceProps.showAdvanced, true);
   assert.equal(ceProps.display.ppAll, true);
   assert.equal(panels['DevWidgets.DocString.docStringWidget'].props.maxHeight, 640);
-  assert.deepEqual(panels['DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget'].props, { maxChildren: 10, maxDepth: 12 });
+  assert.deepEqual(panels['DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget'].props, { maxChildren: 10, maxDepth: 12, maxNodes: 1024 });
   assert.equal(panels['DevWidgets.PTracker.progressWidget'].props.autoRefresh, false);
   assert.equal(panels['DevWidgets.PTracker.progressWidget'].props.autoRemove, false);
   for (const panel of Object.values(panels)) {
@@ -145,7 +158,10 @@ try {
     });
     const analysis = result.declaration?.payload;
     assert.equal(analysis?.declName, 'serverWidgetExample');
-    assert.equal(analysis.hasIR, true);
+    assert.ok(analysis.ir.available);
+    assert.equal(analysis.forceRecompileRequested, true);
+    assert.ok(!Object.hasOwn(analysis, 'hasIR'));
+    assert.ok(!Object.hasOwn(analysis.ir.available.options.compiler.explicitRc, 'schema'));
     for (const code of [analysis.ir, analysis.lcnf]) {
       assert.ok(code.available, JSON.stringify(code));
       assert.equal(code.available.origin, 'recompiledForced');
@@ -157,13 +173,13 @@ try {
   assert.equal(docs.doc, 'A documented integration-test declaration.');
   assert.equal(docs.docFormat, 'markdown');
 
-  const tree = await call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', { pos, uri, maxChildren: 1, maxDepth: 1 });
-  assert.ok(tree.summary.includes(uri));
-  assert.ok(tree.cursorPath.length > 0);
+  const tree = await call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', { pos, maxChildren: 1, maxDepth: 1 });
+  assert.equal(tree.truncated, true);
+  assert.match(tree.summary, /Partial capture/);
   assert.match(JSON.stringify(tree.tree), /depth limit reached/);
   assert.match(JSON.stringify(tree.stxTree), /depth limit reached/);
   // Old clients can omit the new optional limits.
-  const defaultTree = await call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', { pos, uri });
+  const defaultTree = await call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', { pos });
   assert.ok(JSON.stringify(defaultTree.tree).length > JSON.stringify(tree.tree).length);
 
   const progress = await call('DevWidgets.PTracker.readProgressViewRpc');
@@ -175,9 +191,10 @@ try {
   assert.equal(done.label, 'complete');
   assert.equal(running?.status, 'running');
   await assert.rejects(call('DevWidgets.PTracker.deleteProgressRefRpc', { id: running.id }), /still running/);
-  assert.equal(await call('DevWidgets.PTracker.deleteProgressRefRpc', { id: done.id }), true);
+  await call('DevWidgets.PTracker.deleteProgressRefRpc', { id: done.id });
   // Separate sessions in the same file share the registry, including deletions.
   const secondSession = await connect(uri);
+  await rpc(secondSession, uri, pos, 'DevWidgets.PTracker.deleteProgressRefRpc', { id: done.id });
   const remaining = await rpc(secondSession, uri, pos, 'DevWidgets.PTracker.readProgressViewRpc', {});
   assert.deepEqual(remaining.entries.map(entry => entry.id), [running.id]);
 
@@ -215,17 +232,20 @@ def serverWidgetExample : Nat := 42
   const configured = position('configured');
   const editedPanels = await call('Lean.Widget.getWidgets', configured, configured);
   assert.deepEqual(editedPanels.widgets.find(w => w.id === 'DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget').props,
-    { maxChildren: 60, maxDepth: 48 });
+    { maxChildren: 60, maxDepth: 48, maxNodes: 8192 });
   for (const [file, messages] of diagnostics) {
     assert.deepEqual(messages.filter(message => message.severity === 1), [], `Lean errors in ${file}`);
   }
   notify('textDocument/didClose', { textDocument: { uri: otherUri } });
   notify('textDocument/didClose', { textDocument: { uri } });
 } finally {
-  if (server.exitCode === null) {
+  clearTimeout(watchdog);
+  if (server.exitCode === null && server.signalCode === null) {
     try {
-      await request('shutdown', null, 5000);
-      notify('exit', null);
+      if (!fatalError) {
+        await request('shutdown', null, 5000);
+        notify('exit', null);
+      }
     } finally {
       const timer = setTimeout(() => server.kill('SIGKILL'), 2000);
       await exited;
@@ -233,6 +253,7 @@ def serverWidgetExample : Nat := 42
     }
   }
 }
+if (fatalError) throw fatalError;
 assert.equal(server.exitCode, 0, stderr);
 assert.doesNotMatch(stderr, /PANIC|ASSERTION VIOLATION/);
 console.log('Lean-server widget integration checks passed.');

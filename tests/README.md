@@ -19,19 +19,20 @@ lake check-test
 
 ## Current suites
 
-- `tests/CE/RpcAndSchema.lean`: CE widget RPC naming and option-schema coverage.
+- `tests/CE/RpcAndSchema.lean`: canonical CE option-schema coverage.
 - `tests/CE/Compilation.lean`: actual IR/LCNF recompilation in a module with postponed compilation.
-- `tests/PTracker/RpcContracts.lean`: PTracker RPC naming coverage.
+- `tests/PTracker/RpcContracts.lean`: progress success/failure/interruption, idempotent closure/deletion, and headless retention.
 - `tests/InfoTreeExplorer/AtPos.lean`: InfoTree explorer at-pos regression checks.
-- `tests/InfoTreeExplorer/RpcContracts.lean`: InfoTree explorer RPC contract checks.
+- `tests/InfoTreeExplorer/RpcContracts.lean`: structured preview round trips and node-budget checks.
 - `tests/Lib/Resource.lean`: `DevWidgets.Lib.withResource`/`withResourceUnit` behavior.
-- `tests/Rpc/QualifiedMethodNames.lean`: fully-qualified widget RPC method names and executable registrations.
+- `tests/Rpc/QualifiedMethodNames.lean`: executable registration of all six RPC methods (actual frontend names are checked by the runtime suite).
 - `tests/DocString/Resolver.lean`: cursor resolution, doc-comment previews, and declaration candidates.
 - `tests/DocString/VersoLean.lean`: rendering of elaborated Verso docstrings and Lean code.
 - `tests/Widget/Runtime.lean`: runs the shipped JavaScript with Lean-serialized fixtures through
-  `tests/Widget/runtime.mjs`, checking CE defaults, InfoTreeExplorer URI decoding, and PTracker
-  session changes, late RPC replies/deletes, and cleanup. It also checks pin/follow across files,
-  refresh invalidation, presets, typed props, configuration changes, and reset behavior.
+  `tests/Widget/runtime.mjs`, checking CE defaults, InfoTreeExplorer position/budget decoding, and PTracker
+  session changes, both same-session read/delete orderings, shared deletion, and cleanup. It also checks pin/follow across files,
+  refresh invalidation, presets, typed props, configuration changes, reset behavior, multiline
+  focused previews, accurate availability, and the Markdown-to-host-renderer boundary.
   The hook driver controls effects and
   timers; it does not test browser layout or replace a VSCode InfoView smoke test.
 - `tests/Widget/Activation.lean`: panel-free API imports, RPC registration, typed configuration, and local hiding.
@@ -42,12 +43,15 @@ lake check-test
   configuration, JavaScript retrieval, all six widget RPC endpoints, repeated CE
   recompilation, edits, and progress registry sharing/isolation across sessions/files.
   Fixtures are opened as in-memory documents; the test does not modify source files.
-  Requests have timeouts and the server is shut down after success or failure.
+  Requests and the whole run have timeouts; malformed transport data rejects pending
+  requests, and the server is shut down after success or failure.
 - `tests/Examples/Smoke.lean`: import-only smoke test for all runnable demos in `examples/`.
 
 Most files use Lean-native checks (`#eval` + `throwError`/`IO.userError`), and smoke suites
 use import/elaboration success. Any failure stops `lake test`. Lake tracks the JavaScript
-drivers as input dependencies so edits to them invalidate the test build.
+drivers as input dependencies so edits to them invalidate the test build. Lean checks
+are cached by Lake when their inputs are unchanged; repeated `lake test` invocations
+do not necessarily execute every check again.
 
 To run the server checks directly after `lake build`:
 
@@ -58,7 +62,8 @@ lake env node tests/Widget/server.mjs
 ## Actual InfoView browser checks
 
 `tests/Widget/browser.mjs` checks keyboard focus across Pin/Follow, narrow-pane task
-layout, syntax-text contrast, visible retention information, collapsed inspector settings, and task deletion
+layout, syntax-text contrast, visible retention information, collapsed inspector settings, tree-budget
+changes, offline Markdown/HTML policy, and task deletion
 in a real VSCode InfoView. It is optional and uses only Node built-ins. It is separate
 from `lake test`, which does not require VSCode or a graphical display.
 

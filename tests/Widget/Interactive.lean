@@ -16,6 +16,11 @@ configure_panel_widget DevWidgets.PTracker.progressWidget with DevWidgets.PTrack
 
 This longer documentation paragraph should wrap without horizontal scrolling in a narrow
 InfoView pane. Use `usabilityCounter 3` to obtain the next value, `4`.
+
+**Bundled Markdown check**
+
+<span data-devwidgets-raw="yes" onclick="window.devWidgetsUnsafe = true">raw HTML</span>
+[Unsafe link](javascript:alert(1))
 -/
 def usabilityCounter (count : Nat) : Nat := count + 1
 

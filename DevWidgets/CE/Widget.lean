@@ -9,6 +9,7 @@ module
 public import Lean.Widget.UserWidget
 public meta import Lean.Widget.UserWidget
 public import DevWidgets.CE.Analysis
+public meta import DevWidgets.CE.Analysis
 public import DevWidgets.Lib.Panel
 public meta import DevWidgets.Lib.Panel
 public section
@@ -39,7 +40,8 @@ def Config.verbose : Config := {
   showAdvanced := true
 }
 
-def widgetJs : String := DevWidgets.Lib.Panel.javascript ++ r#"
+def widgetJs : String := DevWidgets.Lib.Panel.javascript ++
+  "const optionSchema = " ++ (toJson ceOptionSchemaValue).compress ++ ";\n" ++ r#"
 import * as React from 'react'
 import { useAsync, useRpcSession, mapRpcError } from '@leanprover/infoview'
 
@@ -132,10 +134,8 @@ function codeStatus(kind, result) {
   }
 }
 
-function recompileTooltip(diffs) {
-  if (!Array.isArray(diffs) || diffs.length === 0) return 'Recompiled due to compiler option differences.'
-  const forced = diffs.includes('forced by header checkbox')
-  const optionDiffs = diffs.filter((d) => d !== 'forced by header checkbox')
+function recompileTooltip(diffs, forced) {
+  const optionDiffs = diffs.map(d => `${d.id}: requested=${JSON.stringify(d.requested)}, context=${JSON.stringify(d.context)}`)
   if (forced && optionDiffs.length === 0) {
     return 'Recompiled because "Force recompilation" is enabled.'
   }
@@ -319,36 +319,9 @@ export default function ClickPositionWidget(props) {
   const [forceRecompile, setForceRecompile] = React.useState(false)
   const [lcnfRecompileViaPipeline, setLcnfRecompileViaPipeline] = usePanelSettings(props?.lcnfRecompileViaPipeline !== false)
 
-  const fallbackSchema = React.useMemo(() => ({
-    display: [
-      { id: 'ppLetVarTypes', kind: 'toggle', label: 'LCNF let var types', description: 'Include type annotations on let bindings.', 'defaultBool': false, leanOption: 'pp.letVarTypes' },
-      { id: 'ppFunBinderTypes', kind: 'toggle', label: 'LCNF binder types', description: 'Include type annotations on function parameters.', 'defaultBool': false, leanOption: 'pp.funBinderTypes' },
-      { id: 'ppExplicit', kind: 'toggle', label: 'Explicit arguments', description: 'Show implicit arguments when available.', 'defaultBool': false, leanOption: 'pp.explicit' },
-      { id: 'ppAll', kind: 'toggle', label: 'All details', description: 'Include extra details in printed terms.', 'defaultBool': false, leanOption: 'pp.all' },
-      { id: 'ppFullNames', kind: 'toggle', label: 'Full names', description: 'Avoid abbreviated names in output.', 'defaultBool': false, leanOption: 'pp.fullNames' },
-      { id: 'ppPrivateNames', kind: 'toggle', label: 'Private names', description: 'Display private/internal names explicitly.', 'defaultBool': false, leanOption: 'pp.privateNames' },
-      { id: 'ppUniverses', kind: 'toggle', label: 'Universes', description: 'Include universe levels in names and types.', 'defaultBool': false, leanOption: 'pp.universes' }
-    ],
-    compiler: [
-      { id: 'explicitRc', kind: 'toggle', label: 'IR explicit RC', description: 'Inspect pre reset/reuse-expansion IR.', 'defaultBool': false, leanOption: 'compiler.reuse' },
-      { id: 'compilerExtractClosed', kind: 'toggle', label: 'Extract closed terms', description: 'Cache/evaluate closed terms at initialization.', 'defaultBool': true, leanOption: 'compiler.extract_closed' },
-      { id: 'compilerCheck', kind: 'toggle', label: 'Compiler step check', description: 'Type-check code after compiler steps (debug).', 'defaultBool': false, leanOption: 'compiler.check' },
-      { id: 'compilerCheckTypes', kind: 'toggle', label: 'LCNF type check', description: 'Check type compatibility after LCNF passes (debug).', 'defaultBool': false, leanOption: 'compiler.checkTypes' },
-      { id: 'compilerSmall', kind: 'natChoice', label: 'small', description: 'Inline threshold for tiny declarations.', 'defaultNat': 1, natChoices: [0, 1, 2, 4, 8], leanOption: 'compiler.small' },
-      { id: 'compilerMaxRecInline', kind: 'natChoice', label: 'maxRecInline', description: 'Max recursive inlining for [inline].', 'defaultNat': 1, natChoices: [1, 2, 4, 8, 16], leanOption: 'compiler.maxRecInline' },
-      { id: 'compilerMaxRecInlineIfReduce', kind: 'natChoice', label: 'maxRecInlineIfReduce', description: 'Max recursive inlining for [inline_if_reduce].', 'defaultNat': 16, natChoices: [8, 16, 32, 64], leanOption: 'compiler.maxRecInlineIfReduce' },
-      { id: 'compilerMaxRecSpecialize', kind: 'natChoice', label: 'maxRecSpecialize', description: 'Max recursive specialization depth.', 'defaultNat': 64, natChoices: [16, 32, 64, 128, 256], leanOption: 'compiler.maxRecSpecialize' }
-    ]
-  }), [])
-
-  const schemaState = useAsync(async () => {
-    return await rs.call('DevWidgets.CE.ceOptionSchema', {})
-  }, [rs])
-
-  const schemaValue = (schemaState.state === 'resolved' && schemaState.value) ? schemaState.value : fallbackSchema
-  const displayDescriptors = Array.isArray(schemaValue?.display) ? schemaValue.display : fallbackSchema.display
-  const compilerDescriptors = Array.isArray(schemaValue?.compiler) ? schemaValue.compiler : fallbackSchema.compiler
-  const allDescriptors = [...displayDescriptors, ...compilerDescriptors]
+  const displayDescriptors = optionSchema.display
+  const compilerDescriptors = optionSchema.compiler
+  const allDescriptors = React.useMemo(() => [...displayDescriptors, ...compilerDescriptors], [])
 
   const descriptorDefaults = React.useMemo(() => {
     const out = {}
@@ -366,118 +339,27 @@ export default function ClickPositionWidget(props) {
   }, [allDescriptors])
 
   const [optionValues, setOptionValues, resetOptionValues] = usePanelSettings({
-    explicitRc: false,
-    ppLetVarTypes: false,
-    ppFunBinderTypes: false,
-    ppExplicit: false,
-    ppAll: false,
-    ppFullNames: false,
-    ppPrivateNames: false,
-    ppUniverses: false,
-    compilerExtractClosed: true,
-    compilerCheck: false,
-    compilerCheckTypes: false,
-    compilerSmall: 1,
-    compilerMaxRecInline: 1,
-    compilerMaxRecInlineIfReduce: 16,
-    compilerMaxRecSpecialize: 64,
     ...descriptorDefaults,
     ...(props?.display || {}),
     ...(props?.compiler || {})
   })
 
-  React.useEffect(() => {
-    if (allDescriptors.length === 0) return
-    setOptionValues((prev) => {
-      let changed = false
-      const next = { ...prev }
-      for (const [k, v] of Object.entries(descriptorDefaults)) {
-        if (next[k] === undefined) {
-          next[k] = v
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [allDescriptors.length, descriptorDefaults])
-
-  const getBool = (id, fallback = false) => {
-    const v = optionValues[id]
-    return typeof v === 'boolean' ? v : fallback
-  }
-  const getNat = (id, fallback = 0) => {
-    const n = Number(optionValues[id])
-    return Number.isFinite(n) ? n : fallback
-  }
-
-  const explicitRc = getBool('explicitRc', false)
-  const ppLetVarTypes = getBool('ppLetVarTypes', false)
-  const ppFunBinderTypes = getBool('ppFunBinderTypes', false)
-  const ppExplicit = getBool('ppExplicit', false)
-  const ppAll = getBool('ppAll', false)
-  const ppFullNames = getBool('ppFullNames', false)
-  const ppPrivateNames = getBool('ppPrivateNames', false)
-  const ppUniverses = getBool('ppUniverses', false)
-  const compilerExtractClosed = getBool('compilerExtractClosed', true)
-  const compilerCheck = getBool('compilerCheck', false)
-  const compilerCheckTypes = getBool('compilerCheckTypes', false)
-  const compilerSmall = getNat('compilerSmall', 1)
-  const compilerMaxRecInline = getNat('compilerMaxRecInline', 1)
-  const compilerMaxRecInlineIfReduce = getNat('compilerMaxRecInlineIfReduce', 16)
-  const compilerMaxRecSpecialize = getNat('compilerMaxRecSpecialize', 64)
-
+  const optionGroup = (descriptors) => Object.fromEntries(descriptors.map(d => {
+    const v = optionValues[d.id]
+    const value = d.kind === 'toggle'
+      ? (typeof v === 'boolean' ? v : descriptorDefaults[d.id])
+      : (Number.isSafeInteger(v) && v >= 0 ? v : descriptorDefaults[d.id])
+    return [d.id, value]
+  }))
+  const display = optionGroup(displayDescriptors)
+  const compiler = optionGroup(compilerDescriptors)
   const liveIRState = useAsync(async () => {
     if (control.pinned || !props?.pos) return undefined
-    const params = {
-      pos: props.pos,
-      forceRecompile,
-      lcnfRecompileViaPipeline,
-      display: {
-        ppLetVarTypes,
-        ppFunBinderTypes,
-        ppExplicit,
-        ppAll,
-        ppFullNames,
-        ppPrivateNames,
-        ppUniverses
-      },
-      compiler: {
-        explicitRc,
-        compilerExtractClosed,
-        compilerCheck,
-        compilerCheckTypes,
-        compilerSmall,
-        compilerMaxRecInline,
-        compilerMaxRecInlineIfReduce,
-        compilerMaxRecSpecialize
-      }
-    }
+    const params = { pos: props.pos, forceRecompile, lcnfRecompileViaPipeline, display, compiler }
     return await rs.call('DevWidgets.CE.irAtPos', params)
-  }, [
-    rs,
-    control.pinned,
-    control.revision,
-    props?.pos?.uri,
-    props?.pos?.line,
-    props?.pos?.character,
-    forceRecompile,
-    lcnfRecompileViaPipeline,
-    explicitRc,
-    ppLetVarTypes,
-    ppFunBinderTypes,
-    ppExplicit,
-    ppAll,
-    ppFullNames,
-    ppPrivateNames,
-    ppUniverses,
-    compilerExtractClosed,
-    compilerCheck,
-    compilerCheckTypes,
-    compilerSmall,
-    compilerMaxRecInline,
-    compilerMaxRecInlineIfReduce,
-    compilerMaxRecSpecialize
-  ])
+  }, [rs, control.pinned, control.revision, props?.pos?.uri, props?.pos?.line,
+    props?.pos?.character, forceRecompile, lcnfRecompileViaPipeline,
+    JSON.stringify(display), JSON.stringify(compiler)])
   const irState = control.view(liveIRState)
 
   const c = {
@@ -641,6 +523,9 @@ export default function ClickPositionWidget(props) {
       )
     )
 
+  const getBool = (id) => optionValues[id] ?? descriptorDefaults[id]
+  const getNat = (id) => optionValues[id] ?? descriptorDefaults[id]
+
   const descriptorById = new Map(allDescriptors
     .filter((d) => d && typeof d.id === 'string')
     .map((d) => [d.id, d]))
@@ -721,7 +606,6 @@ export default function ClickPositionWidget(props) {
       )
     } else {
       const decl = typeof declaration.declName === 'string' ? declaration.declName : '<none>'
-      const hasIR = !!declaration.hasIR
       const usedHelperFallback = !!declaration.usedHelperFallback
       const irResult = decodeCodeResult(declaration.ir)
       const lcnfResult = decodeCodeResult(declaration.lcnf)
@@ -733,19 +617,9 @@ export default function ClickPositionWidget(props) {
       const irCode = irResult.text
       const lcnfCode = lcnfResult.text
       const recompileDiffs = Array.isArray(declaration.recompileOptionDiffs)
-        ? declaration.recompileOptionDiffs.filter((s) => typeof s === 'string' && s.length > 0)
+        ? declaration.recompileOptionDiffs
         : []
-      const recompileHint = recompileTooltip(recompileDiffs)
-      const debugInfo = Array.isArray(declaration.debugInfo)
-        ? declaration.debugInfo.filter((s) => typeof s === 'string' && s.length > 0)
-        : []
-      const relevantDebug = (kind) =>
-        debugInfo.filter((line) =>
-          line.startsWith('shouldGenerateError=') ||
-          line.startsWith(`${kind.toLowerCase()}CompileError=`) ||
-          line.startsWith('resolvedDecl=') ||
-          line.startsWith('forcedRecompile=')
-        )
+      const recompileHint = recompileTooltip(recompileDiffs, declaration.forceRecompileRequested === true)
       const badgeStyle = (tone) => {
         let col = c.muted
         if (tone === 'ok') col = c.ok
@@ -766,11 +640,7 @@ export default function ClickPositionWidget(props) {
         lines.push(`cause: ${prettyUnavailableReason(result.reason)}`)
         lines.push(`status=${kind === 'IR' ? irStatus.label : lcnfStatus.label}`)
         if (helperStatus.length > 0) lines.push(helperStatus)
-        const details = relevantDebug(kind)
-        if (details.length > 0) {
-          lines.push('details:')
-          lines.push(...details)
-        }
+        if (declaration.shouldGenerateError) lines.push(declaration.shouldGenerateError)
         return lines.join('\n')
       }
       content = React.createElement(
@@ -794,7 +664,7 @@ export default function ClickPositionWidget(props) {
             usedHelperFallback
               ? React.createElement('span', { style: badgeStyle('muted') }, 'helper fallback')
               : null,
-            React.createElement('span', { style: badgeStyle(hasIR ? 'ok' : 'warn') }, hasIR ? 'IR available' : 'No IR'),
+            React.createElement('span', { style: badgeStyle(irResult.available ? 'ok' : 'warn') }, irResult.available ? 'IR available' : 'No IR'),
             React.createElement(
               'span',
               {

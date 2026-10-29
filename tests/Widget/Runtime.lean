@@ -14,7 +14,7 @@ namespace DevWidgets.Tests.Widget.Runtime
     compiler := DevWidgets.CE.CECompilerOptions.schema
   }
   let analysis : DevWidgets.CE.IRAtPosResponse := .declaration {
-    declName := `testDecl, cursorDeclName := `testDecl, hasIR := false
+    declName := `testDecl, cursorDeclName := `testDecl
     ir := .unavailable .notCompilableConstant
     lcnf := .unavailable .notCompilableConstant
   }
@@ -36,7 +36,8 @@ namespace DevWidgets.Tests.Widget.Runtime
     throw <| IO.userError s!"Widget runtime regression failed:\n{out.stderr}\n{out.stdout}"
   let request ← IO.ofExcept (Json.parse out.stdout)
   let params ← IO.ofExcept (fromJson? request : Except String DevWidgets.InfoTreeExplorer.InfoTreeAtPosParams)
-  unless params.uri? == some "file:///workspace/Example.lean" do
-    throw <| IO.userError s!"InfoTreeExplorer lost the source URI: {params.uri?}"
+  unless params.pos.line == 2 && params.pos.character == 4 && params.maxNodes? == some 4096 do
+    throw <| IO.userError "InfoTreeExplorer request lost its position or node budget"
+
 
 end DevWidgets.Tests.Widget.Runtime

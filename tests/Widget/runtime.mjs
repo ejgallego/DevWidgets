@@ -56,6 +56,7 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
   const asyncDeps = [];
   const context = vm.createContext({
     React,
+    Markdown: "InfoViewMarkdown",
     useRpcSession: () => rpc,
     useAsync: (fn, deps) => {
       asyncCalls.push(fn);
@@ -129,15 +130,15 @@ const view = (description) => ({
 const text = (widget) => JSON.stringify(widget.tree);
 const readMethod = 'DevWidgets.PTracker.readProgressViewRpc';
 
-async function testCEDefaults(schema) {
+async function testCEDefaults() {
   const calls = [];
   const widget = mount(fixtures.ce, { call: async (method, params) => calls.push({ method, params }) },
-    [schema, fixtures.analysis]);
+    [fixtures.analysis]);
   button(widget, 'Verbose').props.onClick();
   widget.render();
   button(widget, 'Defaults').props.onClick();
   widget.render();
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   const params = calls.at(-1).params;
   for (const group of ['display', 'compiler']) {
     for (const descriptor of fixtures.schema[group]) {
@@ -149,10 +150,11 @@ async function testCEDefaults(schema) {
 }
 
 let infoRequest;
-async function testInfoTreeUri() {
+async function testInfoTreeRequest() {
   const widget = mount(fixtures.infoTree, { call: async (_method, params) => { infoRequest = params; } });
   await widget.asyncCalls[0]();
-  assert.equal(infoRequest.uri, pos.uri, 'InfoTreeExplorer request URI');
+  assert.equal(infoRequest.pos.uri, pos.uri, 'cursor source identity');
+  assert.equal(infoRequest.maxNodes, 4096, 'inspection node budget');
   widget.unmount();
 }
 
@@ -272,28 +274,28 @@ async function testCEConfiguration() {
   const calls = [];
   const config = { ...fixtures.ceConfig, compiler: { ...fixtures.ceConfig.compiler, compilerSmall: 7 } };
   const widget = mount(fixtures.ce, { call: async (_method, params) => calls.push(params) },
-    [fixtures.schema, fixtures.analysis], { pos, ...config });
-  await widget.asyncCalls[1]();
+    [fixtures.analysis], { pos, ...config });
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).display.ppFullNames, true);
   button(widget, 'Verbose').props.onClick();
   widget.render();
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).compiler.compilerSmall, 7, 'verbosity must not change compiler settings');
   button(widget, 'Defaults').props.onClick();
   widget.render();
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).display.ppFullNames, false);
   button(widget, 'Reset panel').props.onClick();
   widget.render();
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).display.ppFullNames, true, 'reset must restore Lean props');
   button(widget, 'Defaults').props.onClick();
   widget.render();
   widget.replaceProps({ pos, ...config, display: { ...config.display, ppFullNames: false } });
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).display.ppFullNames, false, 'new configuration must replace local overrides');
   widget.replaceProps({ pos, ...config });
-  await widget.asyncCalls[1]();
+  await widget.asyncCalls[0]();
   assert.equal(calls.at(-1).display.ppFullNames, true, 'old overrides must not reappear when a configuration returns');
   widget.unmount();
 }
@@ -369,7 +371,7 @@ async function testDocConfiguration() {
 }
 
 async function testMissingCursor() {
-  for (const [kind, values] of [['ce', [fixtures.schema]], ['infoTree', [{}]], ['docs', []]]) {
+  for (const [kind, values] of [['ce', []], ['infoTree', [{}]], ['docs', []]]) {
     const widget = mount(fixtures[kind], { call: async () => { throw new Error('unexpected request'); } }, values, {});
     assert.equal(button(widget, 'Pin result').props['aria-disabled'], true);
     assert.equal(button(widget, 'Refresh').props.disabled, true);
@@ -379,17 +381,113 @@ async function testMissingCursor() {
   }
 }
 
+async function testReadDeleteInterleavings() {
+  for (const deleteFirst of [true, false]) {
+    const completed = view('race task');
+    completed.entries[0].status = 'done';
+    completed.entries[0].closedAtNs = 1;
+    const read = deferred(), deletion = deferred();
+    let reads = 0;
+    const widget = mount(fixtures.progress, { call: method => {
+      if (method !== readMethod) return deletion.promise;
+      return ++reads === 1 ? Promise.resolve(completed) : read.promise;
+    } }, [], { pos, ...fixtures.progressConfig });
+    await settle(widget);
+    button(widget, 'Refresh').props.onClick();
+    button(widget, 'Delete').props.onClick();
+    if (deleteFirst) {
+      deletion.resolve(null);
+      await settle(widget);
+      assert.ok(!text(widget).includes('race task'));
+      read.resolve(completed);
+    } else {
+      read.resolve(completed);
+      await settle(widget);
+      deletion.resolve(null);
+    }
+    await settle(widget);
+    assert.ok(!text(widget).includes('race task'), 'late read resurrected deleted task');
+    widget.replaceRpc({ call: async () => completed });
+    await settle(widget);
+    assert.ok(text(widget).includes('race task'), 'deletion marker leaked across sessions');
+    widget.unmount();
+  }
+}
+
+async function testSharedDeletion() {
+  const completed = view('shared task');
+  completed.entries[0].status = 'failed';
+  completed.entries[0].closedAtNs = 1;
+  let present = true;
+  const rpc = { call: async method => {
+    if (method === readMethod) return present ? completed : { nowNs: 100, entries: [] };
+    present = false; // Deleting an absent task is also success.
+    return null;
+  } };
+  const widgets = [0, 1].map(() => mount(fixtures.progress, rpc, [], { pos, ...fixtures.progressConfig }));
+  for (const widget of widgets) await settle(widget);
+  for (const widget of widgets) {
+    assert.ok(text(widget).includes('Failed'));
+    button(widget, 'Delete').props.onClick();
+    await settle(widget);
+    assert.ok(!text(widget).includes('shared task'));
+    widget.unmount();
+  }
+}
+
+async function testStructuredPayloads() {
+  const irMissing = { declaration: { payload: {
+    declName: 'test', cursorDeclName: 'test',
+    ir: { unavailable: { reason: 'compilationReturnedNoCode' } },
+    lcnf: { available: { content: { text: { content: 'LCNF only' } }, origin: 'localEnvironment' } },
+    forceRecompileRequested: true,
+    recompileOptionDiffs: [{ id: 'compilerSmall', requested: 7, context: 1 }]
+  } } };
+  const ce = mount(fixtures.ce, { call: async () => {} }, [irMissing]);
+  assert.ok(text(ce).includes('No IR'));
+  assert.ok(!text(ce).includes('IR available'));
+  ce.unmount();
+  const focused = [{ title: 'a title', path: ['root > literal', 'child'], output: 'first line\nsecond line' }];
+  const tree = mount(fixtures.infoTree, { call: async () => {} }, [{ focused, truncated: true, summary: 'Partial capture' }]);
+  assert.ok(text(tree).includes('second line'), 'multiline preview was lost');
+  assert.ok(text(tree).includes('root > literal'));
+  assert.ok(text(tree).includes('Partial capture'));
+  tree.unmount();
+  const raw = '<script>bad()</script> **documentation** [bad](javascript:alert(1))';
+  const docs = mount(fixtures.docs, { call: async () => {} }, [{ docFormat: 'markdown', doc: raw }]);
+  const markdown = nodes(docs.tree).find(n => n.type === 'InfoViewMarkdown');
+  assert.equal(markdown.props.contents, raw, 'Markdown must use the bundled InfoView renderer');
+  assert.ok(!nodes(docs.tree).some(n => n.props.dangerouslySetInnerHTML), 'raw Markdown became trusted HTML');
+  docs.unmount();
+}
+
+async function testQualifiedCalls() {
+  for (const [kind, method] of [
+    ['ce', 'DevWidgets.CE.irAtPos'], ['docs', 'DevWidgets.DocString.docAtPos'],
+    ['infoTree', 'DevWidgets.InfoTreeExplorer.infoTreeAtPos']
+  ]) {
+    const calls = [];
+    const widget = mount(fixtures[kind], { call: async (method) => { calls.push(method); } });
+    await widget.asyncCalls[0]();
+    assert.deepEqual(calls, [method]);
+    widget.unmount();
+  }
+}
+
 const failures = [];
 for (const [name, run] of [
-  ['CE backend defaults', () => testCEDefaults(fixtures.schema)],
-  ['CE fallback defaults', () => testCEDefaults(undefined)],
-  ['InfoTreeExplorer URI', testInfoTreeUri],
+  ['CE backend defaults', testCEDefaults],
+  ['InfoTreeExplorer request', testInfoTreeRequest],
+  ['PTracker read/delete order', testReadDeleteInterleavings],
+  ['PTracker shared deletion', testSharedDeletion],
+  ['Structured payloads and Markdown boundary', testStructuredPayloads],
+  ['Qualified RPC calls', testQualifiedCalls],
   ['PTracker session change', testSessionChange],
   ['PTracker late deletion', testLateDelete],
   ['PTracker late error', testLateError],
   ['PTracker manual refresh', testManualRefresh],
   ['PTracker unmount', testUnmount],
-  ['CE cursor controls', () => testCursorControls('ce', [fixtures.schema, fixtures.analysis], 1)],
+  ['CE cursor controls', () => testCursorControls('ce', [fixtures.analysis], 0)],
   ['InfoTreeExplorer cursor controls', () => testCursorControls('infoTree', [{}], 0)],
   ['DocString cursor controls', () => testCursorControls('docs', [{ doc: 'pinned documentation', docFormat: 'markdown' }], 0)],
   ['CE configuration', testCEConfiguration],

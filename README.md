@@ -70,7 +70,7 @@ Configurations and task presets stay specific to each widget:
 | Widget | Configuration fields | Named presets |
 | --- | --- | --- |
 | CE | `display`, `compiler`, `showAdvanced`, `lcnfRecompileViaPipeline` | `CE.Config.verbose` |
-| InfoTreeExplorer | `maxChildren`, `maxDepth` | `InfoTreeExplorer.Config.focused`, `.detailed` |
+| InfoTreeExplorer | `maxChildren`, `maxDepth`, `maxNodes` | `InfoTreeExplorer.Config.focused`, `.detailed` |
 | DocString | `maxHeight` in pixels | `DocString.Config.expanded` |
 | PTracker | `autoRefresh`, `intervalMs`, `autoRemove`, `retainDoneMs` | `PTracker.Config.quiet`, `.manual` |
 
@@ -94,21 +94,12 @@ the initial read and explicit refresh/removal.
 whether completed tasks will be deleted. **Delete** removes a task from the shared registry
 for the file, so it disappears from all panels viewing that registry.
 
-InfoTreeExplorer clamps children per node to 1–100 and tree depth to 1–64, and marks
-truncated branches. These limits bound rendered tree expansion, not info collection
-or every snapshot-summary traversal. PTracker clamps polling to 100–60,000 ms and
-retention to 1–3,600 seconds. Automatic removal deletes completed registry entries,
-so another panel viewing the same registry will also stop seeing them.
-
-## Tests
-
-Run all tests with Node.js 22 or later on `PATH` (no npm install is needed):
-
-```bash
-lake test
-```
-
-See [`tests/README.md`](./tests/README.md) for suite details.
+InfoTreeExplorer clamps children per node to 1–100, depth to 1–64, and inspected nodes
+per tree to 1–16,384 (default 4,096). It bounds traversal before computing paths and
+facts, and labels partial captures. Counts and focused results then describe only the
+captured portion. These limits do not bound Lean's original elaboration work or the
+cost of formatting an individual expression. PTracker clamps polling to 100–60,000 ms
+and retention to 1–3,600 seconds. Deletion is shared by panels viewing the same registry.
 
 ## `DevWidgets.CE`
 
@@ -119,7 +110,7 @@ This is an interactive complement to `set_option trace.Compiler.*`:
 - shows IR and LCNF (when available),
 - supports folding and syntax highlighting,
 - exposes pretty-printer/compiler tuning options,
-- can compile on-the-fly and diff outputs,
+- can recompile on demand and explain which compiler options differ from the cursor context,
 - restores option values from the backend schema with the **Defaults** button.
 
 Import:
@@ -151,10 +142,34 @@ def ProgressRef.update
     (label? : Option String := none) : IO Unit
 ```
 
-Tip: call `Lean.Core.checkInterrupted` at safe points in long loops.
+For tactics and commands, use `withElabProgressRef` with the same arguments. It
+records Lean interrupts as **Cancelled**, other exceptions as **Failed**, and rethrows
+both unchanged. Call `Lean.Core.checkInterrupted` at safe points in long loops; see
+[`examples/PTracker.lean`](./examples/PTracker.lean).
+
+The generic `withProgressRef` records an unsuccessful action as **Failed** because
+`MonadFinally` alone cannot classify exceptions. Explicit `ref.close (interrupted := true)`
+records cancellation. Terminal outcomes are preserved by repeated closure, and deleting
+an already-absent task succeeds. Running tasks cannot be deleted.
+
+Closing records an outcome; it does not delete an entry. Automatic retention is owned
+by active panels. With no panel, or with automatic removal disabled, entries remain
+until explicit deletion/pruning or worker exit. Headless callers can apply their own
+retention policy without starting a background worker:
+
+```lean
+-- Inside an IO-capable action: keep at most 100 completed tasks, all younger than a minute.
+discard <| DevWidgets.PTracker.pruneProgressRefs {
+  maxAgeMs? := some 60000, maxCompleted? := some 100
+}
+```
+
+Pruning never removes running tasks. Multiple panels share retention: the shortest
+active retention policy can remove entries also displayed by other panels.
 
 The panel refreshes automatically and reconnects when the InfoView RPC session
-changes. Replies from an earlier session are discarded.
+changes. Replies from an earlier session are discarded, and reads that overlap a
+successful deletion cannot restore the deleted row.
 
 ## `DevWidgets.InfoTreeExplorer`
 
@@ -178,7 +193,11 @@ Docstring inspector panel for the declaration or identifier under cursor.
 This is currently a draft/demo widget and API surface may change.
 
 - Resolves declaration docstrings using elaborated context + syntax fallbacks.
-- Renders both Markdown and Verso docstrings.
+- Uses InfoView's bundled Markdown component, with the same HTML policy as hover docs;
+  there is no CDN script, renderer download, or renderer-loading effect.
+- Renders Verso with escaped text and attributes; links/images reject executable URL schemes.
+  Only this server-generated Verso HTML enters the HTML rendering path. Documentation may
+  still contain external links/images; the renderer itself works offline.
 - Provides raw doc-comment preview when elaborated docs are unavailable.
 - Uses fully-qualified RPC call `DevWidgets.DocString.docAtPos`.
 
@@ -190,9 +209,9 @@ import DevWidgets.DocString
 
 Example file: `examples/DocString.lean`.
 
-## Regression Tests
+## Tests
 
-Run the same local gate as CI:
+With Node.js 22 or later on `PATH` (no npm install), run the same local gate as CI:
 
 ```bash
 lake build
@@ -214,3 +233,30 @@ lake env lean tests/Widget/Server.lean
 
 CI (`.github/workflows/lean_action_ci.yml`) builds the package and runs all suites
 registered in `lakefile.toml` using the toolchain pinned in `lean-toolchain`.
+
+See [`tests/README.md`](./tests/README.md) for coverage and the optional real InfoView
+checks. Those checks run separately from CI and cover keyboard focus, layout, themes,
+and the host Markdown renderer.
+
+## Internal contracts and compatibility
+
+This pre-1.0 PR updates both producers and consumers of the widget RPC payloads:
+
+- CE code availability comes from `ir`/`lcnf` result constructors; the redundant `hasIR`
+  field is removed. Code options contain plain typed values, with static metadata exposed
+  once by `ceOptionSchema` and embedded into the widget from the same Lean definition.
+  `recompileOptionDiffs` contains `{id, requested, context}` records;
+  `forceRecompileRequested` and `shouldGenerateError` replace parsed debug strings.
+- InfoTree `focused` entries contain `{title, path, output}`, where `path` is an array.
+  `truncated` identifies partial captures; `summary` is a status message, not a second
+  Markdown representation of the capture. The redundant request `uri` field is removed;
+  RPC session routing selects the file, and retained UI results preserve their source position.
+- Progress deletion returns `Unit`; success includes an already-absent entry.
+  Status now includes `failed`, and the unused registry counters are removed.
+- The identity-only `DevWidgets.DocString.Markdown` helper module is removed.
+  Import `DevWidgets.DocString.API` for the supported draft API.
+
+Shared controls own panel-local settings and frozen snapshots. Each widget owns its
+RPC contract and task-specific behavior; there is no shared global widget store.
+The retained InfoTree result behavior builds on [PR #8](https://github.com/ejgallego/DevWidgets/pull/8);
+retained and pinned results keep their source position rather than borrowing the new cursor.
