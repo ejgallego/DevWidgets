@@ -76,6 +76,7 @@ When touching specific areas, also run focused checks:
 - Lib resource helpers: `lake env lean tests/Lib/Resource.lean`
 - Widget JavaScript/RPC payloads: `lake env lean tests/Widget/Runtime.lean`
 - Real Lean-server activation/RPC integration: `lake env lean tests/Widget/Server.lean`
+- Actual InfoView keyboard/layout/deletion: optional `node tests/Widget/browser.mjs`; see `tests/README.md` for isolated VSCode setup.
 - Activation/configuration: `lake env lean tests/Widget/Activation.lean` and `lake env lean tests/Widget/DefaultActivation.lean`
 
 PR hygiene expectations:

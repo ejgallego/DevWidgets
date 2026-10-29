@@ -7,3 +7,4 @@ Author: Emilio J. Gallego Arias
 import DevWidgets.PTracker.ProgressRef
 import DevWidgets.PTracker.Widget
 import Lean.Widget.Commands
+import DevWidgets.Lib.Commands

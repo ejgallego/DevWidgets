@@ -186,7 +186,7 @@ async function testLateDelete() {
   const widget = mount(fixtures.progress, { call: (method) =>
     method === readMethod ? Promise.resolve(completed) : deletion.promise });
   await settle(widget);
-  button(widget, '×').props.onClick();
+  button(widget, 'Delete').props.onClick();
   widget.replaceRpc({ call: async () => view('new task with same id') });
   assert.ok(!text(widget).includes('old completed task'), 'rows leaked across sessions');
   await settle(widget);
@@ -235,9 +235,11 @@ async function testUnmount() {
 async function testCursorControls(kind, values, requestIndex) {
   const calls = [];
   const widget = mount(fixtures[kind], { call: async (_method, params) => calls.push(params) }, values);
-  assert.equal(button(widget, 'Pin result').props.disabled, false);
+  assert.equal(button(widget, 'Pin result').props['aria-disabled'], false);
+  const pinKey = button(widget, 'Pin result').props.key;
   button(widget, 'Pin result').props.onClick();
   widget.render();
+  assert.equal(button(widget, 'Follow cursor').props.key, pinKey, 'changing pin mode must preserve the DOM control');
   assert.equal(button(widget, 'Refresh').props.disabled, true);
   const pinnedView = text(widget);
   widget.replaceProps({ pos: { uri: 'file:///another/File.lean', line: 90, character: 0 } });
@@ -257,7 +259,11 @@ async function testCursorControls(kind, values, requestIndex) {
   assert.notEqual(JSON.stringify(widget.asyncDeps[requestIndex]), beforeRefresh, 'refresh did not invalidate the request');
   button(widget, 'Reset panel').props.onClick();
   widget.render();
-  assert.equal(button(widget, 'Pin result').props.disabled, true, 'unresolved results should not be pinnable');
+  assert.equal(button(widget, 'Pin result').props['aria-disabled'], true, 'unresolved results should not be pinnable');
+  button(widget, 'Pin result').props.onClick();
+  widget.render();
+  assert.equal(button(widget, 'Pin result').props.disabled, false, 'unavailable pin control must retain keyboard focus');
+  assert.equal(button(widget, 'Pin result').props['aria-disabled'], true, 'unresolved pin action must be ignored');
   await settle(widget);
   widget.unmount();
 }
@@ -365,7 +371,7 @@ async function testDocConfiguration() {
 async function testMissingCursor() {
   for (const [kind, values] of [['ce', [fixtures.schema]], ['infoTree', [{}]], ['docs', []]]) {
     const widget = mount(fixtures[kind], { call: async () => { throw new Error('unexpected request'); } }, values, {});
-    assert.equal(button(widget, 'Pin result').props.disabled, true);
+    assert.equal(button(widget, 'Pin result').props['aria-disabled'], true);
     assert.equal(button(widget, 'Refresh').props.disabled, true);
     assert.ok(text(widget).includes('Move the cursor'), `${kind} should explain how to get a result`);
     await settle(widget);

@@ -30,10 +30,11 @@ function usePanelSettings(defaults) {
   return [value, update, () => setOverride(null)];
 }
 
-function panelButton(label, onClick, disabled = false, title = '') {
+function panelButton(label, onClick, disabled = false, title = '', key = label, keepFocusable = false) {
   return React.createElement('button', {
-    key: label, type: 'button', onClick, disabled, title,
-    style: { padding: '0.1rem 0.45rem', cursor: disabled ? 'default' : 'pointer' }
+    key, type: 'button', onClick: (event) => { if (!disabled) onClick(event); },
+    disabled: disabled && !keepFocusable, 'aria-disabled': disabled, title,
+    style: { minHeight: '26px', padding: '0.15rem 0.45rem', opacity: disabled ? 0.65 : 1, cursor: disabled ? 'default' : 'pointer' }
   }, label);
 }
 
@@ -54,14 +55,17 @@ function useCursorControls(pos) {
 }
 
 function cursorToolbar(control, state, onReset = () => {}, sourcePos = control.pos) {
+  const cannotPin = !control.pos || !(state.state === 'resolved' && state.value);
   return React.createElement('div', {
     role: 'group', 'aria-label': 'Panel controls',
     style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0' }
   },
     panelButton(control.pinned ? 'Follow cursor' : 'Pin result',
       () => control.pinned ? control.follow() : control.pin(state, sourcePos),
-      !control.pinned && (!control.pos || !(state.state === 'resolved' && state.value)),
-      control.pinned ? 'Resume updates at the current cursor.' : 'Keep this result while moving the cursor.'),
+      !control.pinned && cannotPin,
+      control.pinned ? 'Resume updates at the current cursor.'
+        : cannotPin ? 'Wait for a result at the cursor to pin.' : 'Keep this result while moving the cursor.',
+      'pin-follow', true),
     panelButton('Refresh', control.refresh, control.pinned || !control.pos,
       control.pinned ? 'Follow the cursor to refresh.' : 'Request a fresh result at the current cursor.'),
     panelButton('Reset panel', () => { onReset(); control.reset(); }, false,

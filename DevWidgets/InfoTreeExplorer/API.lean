@@ -6,3 +6,4 @@ Author: Emilio J. Gallego Arias
 
 import DevWidgets.InfoTreeExplorer.InfoTreeExplorer
 import Lean.Widget.Commands
+import DevWidgets.Lib.Commands

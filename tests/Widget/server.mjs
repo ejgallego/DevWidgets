@@ -187,6 +187,8 @@ try {
 import DevWidgets.DocString
 import DevWidgets.InfoTreeExplorer
 import DevWidgets.PTracker
+configure_panel_widget DevWidgets.PTracker.progressWidget with DevWidgets.PTracker.Config.quiet
+configure_panel_widget DevWidgets.PTracker.progressWidget with DevWidgets.PTracker.Config.manual
 /-- Documentation from another file. -/
 def serverWidgetExample : Nat := 42
 #check serverWidgetExample -- other
@@ -197,6 +199,7 @@ def serverWidgetExample : Nat := 42
   const otherCall = (method, params) => rpc(otherSession, otherUri, otherPos, method, params);
   const otherPanels = await otherCall('Lean.Widget.getWidgets', otherPos);
   assert.deepEqual(otherPanels.widgets.map(w => w.id).sort(), Object.keys(panels).sort());
+  assert.equal(otherPanels.widgets.find(w => w.id === 'DevWidgets.PTracker.progressWidget').props.autoRemove, false);
   assert.deepEqual((await otherCall('DevWidgets.PTracker.readProgressViewRpc', {})).entries, []);
   assert.equal((await otherCall('DevWidgets.DocString.docAtPos', { pos: otherPos })).doc,
     'Documentation from another file.');

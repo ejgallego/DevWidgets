@@ -7,6 +7,7 @@ Author: Emilio J. Gallego Arias
 module
 
 public import DevWidgets.CE.Widget
+public import DevWidgets.Lib.Commands
 public meta import DevWidgets.CE.Widget
 public meta import DevWidgets.CE.Analysis
 public meta import Lean.Server.Rpc.RequestHandling

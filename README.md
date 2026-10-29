@@ -42,17 +42,23 @@ Then open any file from `examples/` in Lean/VSCode:
 
 ## Activation and configuration
 
-Use Lean's existing panel command with a typed widget configuration:
+Use `configure_panel_widget` to enable or replace a panel with a typed configuration:
 
 ```lean
-import DevWidgets.PTracker.API
+import DevWidgets.PTracker
 
-show_panel_widgets [local DevWidgets.PTracker.progressWidget with
-  ({ DevWidgets.PTracker.Config.quiet with autoRemove := false } : DevWidgets.PTracker.Config)]
+configure_panel_widget DevWidgets.PTracker.progressWidget with
+  ({ DevWidgets.PTracker.Config.quiet with autoRemove := false } : DevWidgets.PTracker.Config)
 ```
 
-`local` limits activation to the current section/file. Omit it to activate the panel
-in downstream imports too. `scoped` activation is also supported by Lean.
+This command replaces existing instances of that widget, including ones activated by
+imports. It applies to the current section/file; leaving a section restores the previous
+configuration. It is available from both the short imports and `.API` imports.
+
+Lean's `show_panel_widgets [local Widget with config]` **adds** an instance; it does not
+replace one. Use `configure_panel_widget` for ordinary configuration to avoid duplicates.
+For downstream activation, import `.API` and use `show_panel_widgets [Widget with config]`;
+Lean also supports `scoped` activation.
 Hide a panel for the current scope with:
 
 ```lean
@@ -76,12 +82,17 @@ and **Reset panel** controls. Pinning freezes the displayed response and its sou
 position; it does not keep requesting a potentially changed file. Follow the cursor
 again to refresh. **Reset panel** restores the Lean-supplied configuration and unpins.
 CE's separate **Defaults** button restores the compiler schema defaults.
+Compiler output appears before a collapsed **Inspector options** section. InfoTreeExplorer
+shows the focused result first, with metadata, paths, and full trees available as disclosures.
 
 UI overrides belong to the current panel instance; they are not saved across remounts.
 Changing the configuration in Lean replaces those overrides. Keep reusable settings
 in a Lean `Config` value. PTracker uses polling controls instead of cursor pinning;
 **Manual** disables periodic refresh and automatic removal, while still allowing
 the initial read and explicit refresh/removal.
+**Auto-refresh** controls polling only. The always-visible retention message describes
+whether completed tasks will be deleted. **Delete** removes a task from the shared registry
+for the file, so it disappears from all panels viewing that registry.
 
 InfoTreeExplorer clamps children per node to 1–100 and tree depth to 1–64, and marks
 truncated branches. These limits bound rendered tree expansion, not info collection

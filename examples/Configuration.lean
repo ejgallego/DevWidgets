@@ -5,15 +5,15 @@ import DevWidgets.PTracker.API
 
 /-!
 The `.API` imports do not activate panels. Enable only the tools needed here.
-`local` restricts each choice to this file/section instead of downstream imports.
+`configure_panel_widget` replaces existing instances in this file/section only.
 -/
 
-show_panel_widgets [local DevWidgets.CE.compilerExplorerWidget with DevWidgets.CE.Config.verbose]
-show_panel_widgets [local DevWidgets.DocString.docStringWidget with DevWidgets.DocString.Config.expanded]
-show_panel_widgets [local DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget with
-  ({ DevWidgets.InfoTreeExplorer.Config.focused with maxChildren := 15 } : DevWidgets.InfoTreeExplorer.Config)]
-show_panel_widgets [local DevWidgets.PTracker.progressWidget with
-  ({ DevWidgets.PTracker.Config.quiet with autoRemove := false } : DevWidgets.PTracker.Config)]
+configure_panel_widget DevWidgets.CE.compilerExplorerWidget with DevWidgets.CE.Config.verbose
+configure_panel_widget DevWidgets.DocString.docStringWidget with DevWidgets.DocString.Config.expanded
+configure_panel_widget DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget with
+  ({ DevWidgets.InfoTreeExplorer.Config.focused with maxChildren := 15 } : DevWidgets.InfoTreeExplorer.Config)
+configure_panel_widget DevWidgets.PTracker.progressWidget with
+  ({ DevWidgets.PTracker.Config.quiet with autoRemove := false } : DevWidgets.PTracker.Config)
 
 /-- Move the cursor here to inspect documentation, compiler output, or elaboration. -/
 def configuredExample (n : Nat) : Nat := n + 1

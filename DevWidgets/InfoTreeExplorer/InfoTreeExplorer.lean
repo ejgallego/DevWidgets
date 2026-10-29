@@ -590,7 +590,7 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
         borderRadius: '4px',
         border: '1px solid var(--vscode-editorWidget-border)',
         fontFamily: 'var(--vscode-editor-font-family, monospace)',
-        fontSize: '11px'
+        fontSize: '12px'
       };
       if (node.nodeType === 'commandCtx') {
         if (node.commandCtxChanged) {
@@ -598,45 +598,45 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
             return Object.assign({}, base, {
               background: 'rgba(220, 90, 90, 0.22)',
               border: '1px solid rgba(220, 90, 90, 0.6)',
-              color: 'var(--vscode-editorError-foreground)'
+              color: 'var(--vscode-editor-foreground)'
             });
           }
           return Object.assign({}, base, {
             background: 'rgba(215, 140, 60, 0.22)',
             border: '1px solid rgba(215, 140, 60, 0.5)',
-            color: 'var(--vscode-editorWarning-foreground)'
+            color: 'var(--vscode-editor-foreground)'
           });
         }
         return Object.assign({}, base, {
           background: 'rgba(110, 180, 130, 0.18)',
-          color: 'var(--vscode-testing-iconPassed)'
+          color: 'var(--vscode-editor-foreground)'
         });
       }
       if (label.startsWith('context[')) {
-        return Object.assign({}, base, { background: 'rgba(120, 140, 170, 0.18)', color: 'var(--vscode-symbolIcon-classForeground)' });
+        return Object.assign({}, base, { background: 'rgba(120, 140, 170, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('tactic ')) {
-        return Object.assign({}, base, { background: 'rgba(80, 180, 120, 0.18)', color: 'var(--vscode-symbolIcon-methodForeground)' });
+        return Object.assign({}, base, { background: 'rgba(80, 180, 120, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('term ')) {
-        return Object.assign({}, base, { background: 'rgba(90, 150, 210, 0.18)', color: 'var(--vscode-symbolIcon-variableForeground)' });
+        return Object.assign({}, base, { background: 'rgba(90, 150, 210, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('command ')) {
-        return Object.assign({}, base, { background: 'rgba(210, 150, 70, 0.18)', color: 'var(--vscode-symbolIcon-keywordForeground)' });
+        return Object.assign({}, base, { background: 'rgba(210, 150, 70, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('custom ')) {
-        return Object.assign({}, base, { background: 'rgba(190, 120, 210, 0.18)', color: 'var(--vscode-symbolIcon-operatorForeground)' });
+        return Object.assign({}, base, { background: 'rgba(190, 120, 210, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.node ')) {
-        return Object.assign({}, base, { background: 'rgba(100, 170, 220, 0.16)', color: 'var(--vscode-symbolIcon-moduleForeground)' });
+        return Object.assign({}, base, { background: 'rgba(100, 170, 220, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.ident ')) {
-        return Object.assign({}, base, { background: 'rgba(120, 200, 130, 0.16)', color: 'var(--vscode-symbolIcon-variableForeground)' });
+        return Object.assign({}, base, { background: 'rgba(120, 200, 130, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.atom ')) {
-        return Object.assign({}, base, { background: 'rgba(220, 170, 90, 0.16)', color: 'var(--vscode-symbolIcon-stringForeground)' });
+        return Object.assign({}, base, { background: 'rgba(220, 170, 90, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
-      return Object.assign({}, base, { background: 'rgba(128, 128, 128, 0.12)', color: 'var(--vscode-foreground)' });
+      return Object.assign({}, base, { background: 'rgba(128, 128, 128, 0.12)', color: 'var(--vscode-editor-foreground)' });
     }
 
     function collectOpenPathKeys(root, labels) {
@@ -887,43 +887,87 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
             }))
           )
         ),
-        e('div', {
-          style: {
-            marginTop: '0.42rem',
-            marginBottom: '0.35rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.3rem',
-            whiteSpace: 'nowrap',
-            overflowX: 'auto',
-            paddingBottom: '0.08rem'
-          }
-        },
-          e('span', {
+        e('details', {}, e('summary', {}, 'Snapshot details · ' + cursorLabel),
+          e('div', {
             style: {
-              fontWeight: '700',
-              letterSpacing: '0.02em',
-              marginRight: '0.15rem'
+              marginTop: '0.42rem',
+              marginBottom: '0.35rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              flexWrap: 'wrap',
+              overflowWrap: 'anywhere',
+              paddingBottom: '0.08rem'
             }
-          }, 'Explorer'),
-          ...headerChips.map((pair, i) =>
+          },
             e('span', {
-              key: i,
               style: {
-                border: '1px solid var(--vscode-editorWidget-border)',
-                borderRadius: '999px',
-                padding: '0.08rem 0.42rem',
-                background: pair[0] === 'errors' && String(pair[1]) === 'true'
-                  ? 'rgba(220, 90, 90, 0.2)'
-                  : 'var(--vscode-editor-background)',
-                fontSize: '0.74rem',
-                lineHeight: '1.2'
+                fontWeight: '700',
+                letterSpacing: '0.02em',
+                marginRight: '0.15rem'
               }
-            }, pair[0] + ': ' + pair[1])
+            }, 'Explorer'),
+            ...headerChips.map((pair, i) =>
+              e('span', {
+                key: i,
+                style: {
+                  border: '1px solid var(--vscode-editorWidget-border)',
+                  borderRadius: '999px',
+                  padding: '0.08rem 0.42rem',
+                  background: pair[0] === 'errors' && String(pair[1]) === 'true'
+                    ? 'rgba(220, 90, 90, 0.2)'
+                    : 'var(--vscode-editor-background)',
+                  fontSize: '0.74rem',
+                  lineHeight: '1.2'
+                }
+              }, pair[0] + ': ' + pair[1])
+            )
           )
         ),
-        e('details', { open: true, style: { marginTop: '0.5rem' } },
-          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'Path to Cursor'),
+        parsedFocused.length > 0
+          ? e('div', { style: { marginTop: '0.3rem' } },
+              e('div', {
+                style: {
+                  fontWeight: '600',
+                  marginBottom: '0.2rem',
+                  fontSize: '0.78rem',
+                  color: 'var(--vscode-descriptionForeground)'
+                }
+              }, 'At cursor'),
+              e('div', {
+                style: {
+                  display: 'grid',
+                  gap: '0.22rem'
+                }
+              },
+              ...parsedFocused.slice(0, 3).map((f, i) =>
+                e('div', {
+                  key: i,
+                  style: {
+                    border: '1px solid var(--vscode-editorWidget-border)',
+                    borderRadius: '7px',
+                    padding: '0.2rem 0.35rem',
+                    background: 'var(--vscode-editor-background)'
+                  }
+                },
+                  e('div', { style: { fontSize: '0.74rem', fontWeight: '600' } }, f.title),
+                  f.output
+                    ? e('div', {
+                        style: {
+                          marginTop: '0.12rem',
+                          fontSize: '0.72rem',
+                          color: 'var(--vscode-descriptionForeground)',
+                          whiteSpace: 'pre-wrap',
+                          overflowWrap: 'anywhere'
+                        }
+                      }, f.output)
+                    : null
+                )
+              ))
+            )
+          : null,
+        e('details', { style: { marginTop: '0.5rem' } },
+          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'Path to cursor'),
           cursorPath.length > 0
             ? e('ul', {
                 style: {
@@ -976,49 +1020,6 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
               )
             )
             : e('div', { style: { marginTop: '0.4rem', color: 'var(--vscode-descriptionForeground)' } }, 'No cursor path captured.'),
-          parsedFocused.length > 0
-            ? e('div', { style: { marginTop: '0.3rem' } },
-                e('div', {
-                  style: {
-                    fontWeight: '600',
-                    marginBottom: '0.2rem',
-                    fontSize: '0.78rem',
-                    color: 'var(--vscode-descriptionForeground)'
-                  }
-                }, 'Focused preview in path context'),
-                e('div', {
-                  style: {
-                    display: 'grid',
-                    gap: '0.22rem'
-                  }
-                },
-                ...parsedFocused.slice(0, 3).map((f, i) =>
-                  e('div', {
-                    key: i,
-                    style: {
-                      border: '1px solid var(--vscode-editorWidget-border)',
-                      borderRadius: '7px',
-                      padding: '0.2rem 0.35rem',
-                      background: 'var(--vscode-editor-background)'
-                    }
-                  },
-                    e('div', { style: { fontSize: '0.74rem', fontWeight: '600' } }, f.title),
-                    f.output
-                      ? e('div', {
-                          style: {
-                            marginTop: '0.12rem',
-                            fontSize: '0.72rem',
-                            color: 'var(--vscode-descriptionForeground)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }
-                        }, f.output)
-                      : null
-                  )
-                ))
-              )
-            : null,
           focused.length > 0
             ? e('details', { open: false, style: { marginTop: '0.32rem' } },
                 e('summary', { style: { cursor: 'pointer' } }, 'Focused details (' + focused.length + ')'),
@@ -1086,13 +1087,13 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
               )
             : null
         ),
+        e('details', { style: { marginTop: '0.4rem' } },
+          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'InfoTree'),
         e('div', { style: { marginTop: '0.2rem', marginBottom: '0.5rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' } },
           e('button', { onClick: () => setForceOpen(true) }, 'Expand all'),
           e('button', { onClick: () => setForceOpen(false) }, 'Collapse all'),
           e('button', { onClick: () => setForceOpen(null) }, 'Focus path')
         ),
-        e('details', { open: true, style: { marginTop: '0.4rem' } },
-          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'InfoTree'),
           payload.tree
             ? e('ul', { style: boxStyle }, e(TreeNode, {
                 node: payload.tree,

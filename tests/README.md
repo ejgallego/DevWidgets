@@ -35,7 +35,8 @@ lake check-test
   The hook driver controls effects and
   timers; it does not test browser layout or replace a VSCode InfoView smoke test.
 - `tests/Widget/Activation.lean`: panel-free API imports, RPC registration, typed configuration, and local hiding.
-- `tests/Widget/DefaultActivation.lean`: short imports activate each panel exactly once.
+- `tests/Widget/DefaultActivation.lean`: short imports activate each panel exactly once;
+  repeated `configure_panel_widget` replaces imported instances and restores them after a section.
 - `tests/Widget/Server.lean`: starts a real Lean language server through
   `tests/Widget/server.mjs` and checks panel activation, section scoping, serialized
   configuration, JavaScript retrieval, all six widget RPC endpoints, repeated CE
@@ -54,5 +55,30 @@ To run the server checks directly after `lake build`:
 lake env node tests/Widget/server.mjs
 ```
 
-These checks exercise the real Lean RPC protocol; browser layout and VSCode
-InfoView integration still need an editor smoke test.
+## Actual InfoView browser checks
+
+`tests/Widget/browser.mjs` checks keyboard focus across Pin/Follow, narrow-pane task
+layout, syntax-text contrast, visible retention information, collapsed inspector settings, and task deletion
+in a real VSCode InfoView. It is optional and uses only Node built-ins. It is separate
+from `lake test`, which does not require VSCode or a graphical display.
+
+After `lake build`, start an **isolated** VSCode window with a temporary profile and
+the Lean extension installed:
+
+```bash
+code --new-window --user-data-dir /tmp/dev-widgets-ui --remote-debugging-port=9231 . tests/Widget/Interactive.lean
+```
+
+In that window, place the cursor on `usabilityCounter` in the final `#check`, open
+Lean InfoView, and wait for the three sample tasks and compiler output. Then run:
+
+```bash
+# Arguments: debugging port, window width, optional screenshot destination.
+node tests/Widget/browser.mjs 9231 900 /tmp/dev-widgets-ui.png
+```
+
+Run it in both light and dark themes, and at a wider window width (for example 1440).
+Use **Lean 4: Server: Restart File** before each run to recreate the deleted sample task.
+The script drives the focused controls and deletes the completed fixture task, so use
+the dedicated window and fixture. Close the window when finished. Inspect the resulting
+screenshots for theme contrast and visual hierarchy; automated checks do not replace that review.

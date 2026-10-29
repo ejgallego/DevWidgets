@@ -1,6 +1,11 @@
 unreleased
 ----------
 
+- [Lib] Add section-local `configure_panel_widget` replacement to avoid duplicate imported panels, and preserve keyboard focus when toggling Pin/Follow.
+- [PTracker] Use wrapping task cards with visible Delete actions, explicit Auto-refresh labeling, and always-visible shared-registry retention information.
+- [CE] Put output before collapsed inspector settings and use distinct light/dark syntax palettes with high-contrast theme support.
+- [InfoTreeExplorer] Show focused results first, collapse detailed paths and trees, wrap metadata, and use theme foregrounds for readable node labels.
+- [Tests] Add an optional real InfoView browser suite for keyboard focus, narrow layout, syntax contrast, retention information, and deletion, with a dedicated interactive fixture.
 - [Tests] Exercise independent activation, configured panels, all widget RPC endpoints, edits, and cross-file progress isolation against a real Lean server in `lake test`.
 - [Lib] Share cursor pin/follow, refresh, reset, and configuration-override behavior across independent widgets.
 - [CE] Add typed panel configuration and a verbose inspection preset; reset can restore Lean-supplied defaults.

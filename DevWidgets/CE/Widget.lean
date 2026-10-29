@@ -489,11 +489,11 @@ export default function ClickPositionWidget(props) {
     warn: 'var(--vscode-testing-iconQueued, #cca700)',
     err: 'var(--vscode-errorForeground, #f14c4c)',
     panel: 'var(--vscode-textCodeBlock-background, #111)',
-    kw: '#c678dd',
-    id: '#61afef',
-    num: '#e5c07b',
-    str: '#98c379',
-    punct: '#abb2bf'
+    kw: 'var(--dw-code-keyword)',
+    id: 'var(--dw-code-identifier)',
+    num: 'var(--dw-code-number)',
+    str: 'var(--dw-code-string)',
+    punct: 'var(--vscode-editor-foreground)'
   }
 
   const sectionTitle = (key, text) =>
@@ -512,13 +512,13 @@ export default function ClickPositionWidget(props) {
 
   const optionGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 15rem), 1fr))',
     gap: '0.45rem 0.85rem'
   }
 
   const advancedGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(16rem, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))',
     gap: '0.45rem 0.85rem'
   }
 
@@ -580,7 +580,8 @@ export default function ClickPositionWidget(props) {
     background: c.bg,
     color: c.fg,
     padding: '0.1rem 0.35rem',
-    fontSize: '0.78em',
+    fontSize: '0.9em',
+    minHeight: '26px',
     cursor: 'pointer'
   }
 
@@ -755,7 +756,7 @@ export default function ClickPositionWidget(props) {
           borderRadius: '999px',
           fontSize: '0.8em',
           border: `1px solid ${col}`,
-          color: col,
+          color: c.fg,
           whiteSpace: 'nowrap'
         }
       }
@@ -815,6 +816,13 @@ export default function ClickPositionWidget(props) {
             ? React.createElement('div', { style: { color: c.muted, fontSize: '0.82em', textAlign: 'right' } }, helperStatus)
             : null
         ),
+        sectionTitle('irTitle', 'IR'),
+        codePanel('irCode', irCode, unavailableText('IR', irResult), irFoldState, setIrFoldState),
+        React.createElement('div', { style: { height: '0.6rem' } }),
+        sectionTitle('lcnfTitle', 'LCNF'),
+        codePanel('lcnfCode', lcnfCode, unavailableText('LCNF', lcnfResult), lcnfFoldState, setLcnfFoldState),
+        React.createElement('details', { style: { marginTop: '0.75rem' } },
+          React.createElement('summary', { style: { cursor: 'pointer', padding: '0.3rem 0', fontWeight: 600 } }, 'Inspector options'),
         React.createElement(
           'fieldset',
           {
@@ -897,12 +905,8 @@ export default function ClickPositionWidget(props) {
             },
             'Display options are server pretty-printer settings; compiler options change code generation and may force recompilation.'
           )
-        ),
-        sectionTitle('irTitle', 'IR'),
-        codePanel('irCode', irCode, unavailableText('IR', irResult), irFoldState, setIrFoldState),
-        React.createElement('div', { style: { height: '0.6rem' } }),
-        sectionTitle('lcnfTitle', 'LCNF'),
-        codePanel('lcnfCode', lcnfCode, unavailableText('LCNF', lcnfResult), lcnfFoldState, setLcnfFoldState)
+        )
+        )
       )
     }
   } else if (irState.state === 'rejected') {
@@ -919,6 +923,7 @@ export default function ClickPositionWidget(props) {
   return React.createElement(
     'div',
     {
+      className: 'dw-compiler',
       style: {
         border: `1px solid ${c.border}`,
         borderRadius: '8px',
@@ -927,6 +932,14 @@ export default function ClickPositionWidget(props) {
         background: c.bg
       }
     },
+    React.createElement('style', null, `
+      .dw-compiler { --dw-code-keyword: #c678dd; --dw-code-identifier: #61afef; --dw-code-number: #e5c07b; --dw-code-string: #98c379; }
+      .vscode-light .dw-compiler { --dw-code-keyword: #7b218f; --dw-code-identifier: #005b96; --dw-code-number: #805400; --dw-code-string: #286126; }
+      .vscode-high-contrast .dw-compiler, .vscode-high-contrast-light .dw-compiler {
+        --dw-code-keyword: var(--vscode-editor-foreground); --dw-code-identifier: var(--vscode-editor-foreground);
+        --dw-code-number: var(--vscode-editor-foreground); --dw-code-string: var(--vscode-editor-foreground);
+      }
+    `),
     React.createElement(
       'div',
       {

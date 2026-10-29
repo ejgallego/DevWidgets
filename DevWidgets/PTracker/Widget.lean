@@ -126,7 +126,8 @@ export default function ProgressWidget(props) {
     const n = Number(ns);
     if (!Number.isFinite(n)) return 'n/a';
     const elapsedMs = Math.max(0, (estimatedNowNs - n) / 1_000_000);
-    return `${formatDurationMs(elapsedMs)} ago`;
+    const duration = formatDurationMs(elapsedMs);
+    return duration === 'just now' ? duration : `${duration} ago`;
   }
 
   function statusIcon(status) {
@@ -169,7 +170,7 @@ export default function ProgressWidget(props) {
     return e('div', { key: 'expiry', style: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem' } }, [
       e('span', {
         key: 'ring',
-        title: `${Math.ceil(remainingMs / 1000)}s until auto-remove`,
+        title: `${Math.ceil(remainingMs / 1000)}s until deletion`,
         style: {
           width: '1rem',
           height: '1rem',
@@ -212,7 +213,7 @@ export default function ProgressWidget(props) {
       nodes.push(e('div', { key: 'label', style: { opacity: 0.9 } }, label));
     }
     if (hasTotal) {
-      nodes.push(e('div', { key: 'bar-wrap', style: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem' } }, [
+      nodes.push(e('div', { key: 'bar-wrap', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem' } }, [
         e('span', {
           key: 'bar-outer',
           style: {
@@ -317,7 +318,7 @@ export default function ProgressWidget(props) {
           checked: autoEnabled,
           onChange: (ev) => setAutoEnabled(Boolean(ev.target.checked))
         }),
-        'Auto'
+        'Auto-refresh'
       ]),
       e('label', { key: 'period', style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem' } }, [
         'Every',
@@ -354,7 +355,7 @@ export default function ProgressWidget(props) {
       e('label', { key: 'auto-remove' }, [
         e('input', { key: 'enabled', type: 'checkbox', checked: settings.autoRemove,
           onChange: (ev) => setSettings((prev) => ({ ...prev, autoRemove: Boolean(ev.target.checked) })) }),
-        'Remove completed tasks automatically'
+        'Delete completed tasks automatically'
       ]),
       e('label', { key: 'retention' }, [
         ' Keep for ',
@@ -365,67 +366,44 @@ export default function ProgressWidget(props) {
         ' seconds'
       ])
     ]),
-    e('div', { key: 'rows', style: { display: 'grid', gap: '0.3rem', minWidth: 0, overflowX: 'auto' } }, [
+    e('div', { key: 'retention-status', role: 'status', style: { fontSize: '0.85em' } },
+      settings.autoRemove
+        ? `Completed tasks are deleted from all panels after ${RETAIN_DONE_MS / 1000} seconds. Auto-refresh does not control deletion.`
+        : 'Completed tasks are kept until you delete them. Deletion affects all panels in this file.'),
+    e('div', { key: 'rows', style: { display: 'grid', gap: '0.5rem', minWidth: 0 } }, [
       entries.length === 0
         ? e('em', { key: 'empty' }, 'No tracked progress refs.')
-        : e('table', { key: 'table', style: { borderCollapse: 'collapse', width: '100%' } }, [
-            e('thead', { key: 'thead' }, e('tr', {}, [
-              e('th', { key: 'h-id', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Ref'),
-              e('th', { key: 'h-st', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'St'),
-              e('th', { key: 'h-value', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Value'),
-              e('th', { key: 'h-created', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Age'),
-              e('th', { key: 'h-updated', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Updated'),
-              e('th', { key: 'h-actions', style: { textAlign: 'right', padding: '0.2rem 0 0.2rem 0' } }, 'Actions')
-            ])),
-            e('tbody', { key: 'tbody' }, entries.map((entry) => {
-              const status = String(entry.status ?? 'running');
-              const isClosed = isClosedStatus(status);
-              const idNum = Number(entry.id);
-              const deleting = session.pendingDeleteIds.has(idNum);
-              const createdNs = Number(entry.createdAtNs);
-              const updatedNs = Number(entry.lastUpdatedAtNs);
-              return e('tr', {
-                key: String(entry.id),
-                style: {
-                  opacity: isClosed ? 0.62 : 1,
-                  background: rowBackground(status)
-                }
-              }, [
-                e('td', { key: 'id', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, `#${entry.id}`),
-                e('td', { key: 'status', style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' }, title: statusLabel(status) }, statusIcon(status)),
-                e('td', { key: 'value', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, renderValue(entry)),
-                e('td', {
-                  key: 'created',
-                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
-                  title: `created @ ${formatMonoSeconds(createdNs)}`
-                }, formatElapsedSince(createdNs)),
-                e('td', {
-                  key: 'updated',
-                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
-                  title: `updated @ ${formatMonoSeconds(updatedNs)}`
-                }, formatElapsedSince(updatedNs)),
-                e('td', {
-                  key: 'actions',
-                  style: {
-                    padding: '0.2rem 0 0.2rem 0',
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    alignItems: 'center',
-                    gap: '0.35rem'
-                  }
-                }, isClosed ? [
-                  renderExpiry(entry),
-                  e('button', {
-                    key: 'remove',
-                    title: 'Remove from view now',
-                    onClick: () => void deleteEntry(idNum),
-                    disabled: deleting,
-                    style: { padding: '0 0.35rem', lineHeight: '1.1rem' }
-                  }, deleting ? '...' : '×')
-                ] : null)
-              ]);
-            }))
-          ])
+        : entries.map((entry) => {
+            const status = String(entry.status ?? 'running');
+            const isClosed = isClosedStatus(status);
+            const idNum = Number(entry.id);
+            const deleting = session.pendingDeleteIds.has(idNum);
+            return e('article', {
+              key: String(entry.id),
+              'aria-label': String(entry.description || `Task ${entry.id}`),
+              style: { minWidth: 0, padding: '0.5rem', border: '1px solid var(--vscode-editorWidget-border)',
+                borderRadius: '6px', background: rowBackground(status), overflowWrap: 'anywhere' }
+            }, [
+              e('div', { key: 'header', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' } }, [
+                e('span', { key: 'status' }, `${statusIcon(status)} ${statusLabel(status)} · #${entry.id}`),
+                isClosed ? e('button', {
+                  key: 'delete', type: 'button',
+                  title: 'Delete this completed task from the shared registry for this file.',
+                  'aria-label': `Delete task ${entry.id}: ${entry.description || ''}`,
+                  onClick: () => void deleteEntry(idNum), disabled: deleting,
+                  style: { marginLeft: 'auto', minHeight: '26px', padding: '0.15rem 0.45rem' }
+                }, deleting ? 'Deleting…' : 'Delete') : null,
+                isClosed ? renderExpiry(entry) : null
+              ]),
+              e('div', { key: 'value', style: { minWidth: 0 } }, renderValue(entry)),
+              e('div', { key: 'times', style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem 1rem', marginTop: '0.35rem', fontSize: '0.85em' } }, [
+                e('span', { key: 'created', title: `created @ ${formatMonoSeconds(Number(entry.createdAtNs))}` },
+                  `Created ${formatElapsedSince(entry.createdAtNs)}`),
+                e('span', { key: 'updated', title: `updated @ ${formatMonoSeconds(Number(entry.lastUpdatedAtNs))}` },
+                  `Updated ${formatElapsedSince(entry.lastUpdatedAtNs)}`)
+              ])
+            ]);
+          })
     ]),
     error ? e('pre', { key: 'err', style: { color: 'var(--vscode-errorForeground)', margin: 0 } }, error) : null
   ]);
