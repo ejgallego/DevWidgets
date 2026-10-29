@@ -1,4 +1,4 @@
-import DevWidgets.PTracker.Widget
+import DevWidgets.PTracker
 import Lean.Widget
 import Lean
 
@@ -26,7 +26,7 @@ elab_rules : command
       let steps := steps.getNat
       let work := work.getNat
       let sleepMs := UInt32.ofNat sleepMs.getNat
-      withProgressRef (some steps) "main task" "starting main task" fun mainRef => do
+      withElabProgressRef (some steps) "main task" "starting main task" fun mainRef => do
         for i in [0:steps] do
           liftCoreM $ Lean.Core.checkInterrupted
           let _ ← burnWork work
@@ -34,7 +34,5 @@ elab_rules : command
           liftIO <| mainRef.update done (label? := some s!"main step: {done} / {steps}")
           if sleepMs != 0 then
             liftIO <| IO.sleep sleepMs
-
-show_panel_widgets [progressWidget]
 
 #progress_elab 111 54220 102

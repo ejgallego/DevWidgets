@@ -114,4 +114,21 @@ def versoPipeline (n : Nat) : Nat :=
   2 * n + mdSum [n, 1]
 
 
+-- Unresolved deferred elements must keep their fallback content visible.
+#eval show CoreM Unit from do
+  let doc : VersoDocString := {
+    text := #[.para #[.deferred 0 #[.text "inline <fallback>"]],
+      .deferred 1 #[.para #[.text "block & fallback"]]]
+    subsections := #[]
+  }
+  let html := DevWidgets.DocString.renderVersoDocHtml doc
+  assertContains "deferred inline" html "inline &lt;fallback&gt;"
+  assertContains "deferred block" html "block &amp; fallback"
+
 end DevWidgets.Tests.DocString.VersoLean
+
+#eval show CoreM Unit from do
+  for url in ["javascript:alert(1)", "DATA:text/html,bad", "java\nscript:bad", "vbscript:bad"] do
+    if DevWidgets.DocString.safeDocUrl url then throwError "accepted unsafe documentation URL"
+  for url in ["https://lean-lang.org", "http://localhost/doc", "mailto:lean@example.org", "#example", "../guide"] do
+    unless DevWidgets.DocString.safeDocUrl url do throwError "rejected ordinary documentation URL"

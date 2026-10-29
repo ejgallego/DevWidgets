@@ -130,7 +130,7 @@ private def assertEqNames (label : String) (expected actual : List Name) : CoreM
   let posInDoc := docRange.start + 'x'
   let some (fmt, preview) := DevWidgets.DocString.Testing.docCommentPreviewAtOrNearPos? src cmd posInDoc
     | throwError "expected preview extraction inside doc comment"
-  unless fmt == DevWidgets.DocString.markdownPreviewDocFormat do
+  unless fmt == "markdown-preview" do
     throwError m!"expected markdown preview format, got {fmt}"
   unless preview.contains "nearby docs" do
     throwError m!"expected preview to contain doc body text, got: {preview}"
