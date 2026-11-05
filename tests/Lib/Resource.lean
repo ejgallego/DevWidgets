@@ -50,4 +50,27 @@ private def assertEq [BEq α] [ToString α] (label : String) (expected actual : 
   assertEq "withResourceUnit result" 12 n
   assertEq "withResourceUnit release-called" true (← released.get)
 
+#eval show IO Unit from do
+  let released ← IO.mkRef false
+  let error ← try
+    let _ : Unit ← DevWidgets.Lib.withResource
+      (throw <| IO.userError "acquisition")
+      (fun (_ : Unit) _ => released.set true)
+      pure
+    pure "unexpected success"
+  catch e => pure e.toString
+  unless error.contains "acquisition" && !(← released.get) do
+    throw <| IO.userError "release ran without acquisition"
+
+#eval show IO Unit from do
+  let releases ← IO.mkRef 0
+  let error ← try
+    let _ : Unit ← DevWidgets.Lib.withResource (pure ())
+      (fun _ _ => do releases.modify (· + 1); throw <| IO.userError "cleanup")
+      (fun _ => throw <| IO.userError "action")
+    pure "unexpected success"
+  catch e => pure e.toString
+  unless error.contains "cleanup" && (← releases.get) == 1 do
+    throw <| IO.userError "unexpected finalizer failure precedence"
+
 end DevWidgets.Tests.Lib.Resource

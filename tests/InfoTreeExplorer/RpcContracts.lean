@@ -1,23 +1,22 @@
-import DevWidgets.InfoTreeExplorer.InfoTreeExplorer
+import DevWidgets.InfoTreeExplorer
 import Lean
 
-namespace DevWidgets.Tests.InfoTreeExplorer.RpcContracts
-
-open Lean
-
-private def assertContains (label haystack needle : String) : CoreM Unit := do
-  unless haystack.contains needle do
-    throwError m!"expected `{label}` to contain `{needle}`\n---\n{haystack}\n---"
-
-private def assertNotContains (label haystack needle : String) : CoreM Unit := do
-  if haystack.contains needle then
-    throwError m!"expected `{label}` to not contain `{needle}`\n---\n{haystack}\n---"
+open Lean DevWidgets.InfoTreeExplorer
 
 #eval show CoreM Unit from do
-  let js := DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget.javascript
-  assertContains "InfoTreeExplorer widget JS" js "await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params)"
-  assertNotContains "InfoTreeExplorer widget JS" js "for (const method of ['infoTreeAtPos', 'DevWidgets.InfoTreeExplorer.infoTreeAtPos'])"
-  assertContains "InfoTreeExplorer widget JS" js "props?.pos"
-  assertNotContains "InfoTreeExplorer widget JS" js "fetchInfoTreeSummary"
-
-end DevWidgets.Tests.InfoTreeExplorer.RpcContracts
+  let preview : FocusedPreview := { title := "title", path := #["contains > separator", "child"], output := "first\nsecond" }
+  let encoded := toJson preview
+  let .ok decoded := fromJson? (α := FocusedPreview) encoded
+    | throwError "focused payload failed to decode"
+  unless decoded.path == preview.path && decoded.output == preview.output do
+    throwError "focused payload lost structure"
+  let config := Config.bounded { maxNodes := 1000000 }
+  unless config.maxNodes == 16384 do throwError "node budget was not clamped"
+  let leaf : Elab.InfoTree := .hole ⟨`test⟩
+  let deep := (List.range 1000).foldl (fun tree _ => .context (.parentDeclCtx `demo) tree) leaf
+  let (bounded, truncated) := boundedInfoTree deep { maxNodes := 5 }
+  unless truncated do throwError "expected bounded capture"
+  let rec count : Elab.InfoTree → Nat
+    | .context _ child => 1 + count child
+    | _ => 1
+  unless count bounded == 6 do throwError "node budget did not stop traversal"

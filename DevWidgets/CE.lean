@@ -6,10 +6,8 @@ Author: Emilio J. Gallego Arias
 
 module
 
-public import DevWidgets.CE.Widget
+public import DevWidgets.CE.API
+public meta import DevWidgets.CE.API
 meta import Lean.Widget.Commands
-public section
 
-open DevWidgets.CE in
--- Enable the CE widget globally for modules importing `DevWidgets.CE`.
-show_panel_widgets [compilerExplorerWidget]
+show_panel_widgets [DevWidgets.CE.compilerExplorerWidget]

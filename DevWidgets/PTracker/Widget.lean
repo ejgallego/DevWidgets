@@ -5,11 +5,26 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
+import DevWidgets.Lib.Panel
 import DevWidgets.PTracker.ProgressRef
 
 open Lean Server
 
 namespace DevWidgets.PTracker
+
+/-- Initial polling and retention settings for the progress panel. Durations are milliseconds. -/
+structure Config where
+  autoRefresh : Bool := true
+  intervalMs : Nat := 250
+  autoRemove : Bool := true
+  retainDoneMs : Nat := 20000
+  deriving ToJson, FromJson
+
+/-- Less frequent polling and a longer window to inspect completed tasks. -/
+def Config.quiet : Config := { intervalMs := 1000, retainDoneMs := 60000 }
+
+/-- Refresh and remove entries only on request. -/
+def Config.manual : Config := { autoRefresh := false, autoRemove := false }
 
 structure ReadProgressViewParams where
   deriving ToJson, FromJson
@@ -31,32 +46,47 @@ structure DeleteProgressRefParams where
   deriving ToJson, FromJson
 
 @[server_rpc_method]
-meta def deleteProgressRefRpc (params : DeleteProgressRefParams) : RequestM (RequestTask Bool) :=
+meta def deleteProgressRefRpc (params : DeleteProgressRefParams) : RequestM (RequestTask Unit) :=
   RequestM.asTask do
     deleteProgressRef params.id
-    pure true
 
 @[widget_module]
 def progressWidget : Lean.Widget.Module where
-  javascript := "
+  javascript := DevWidgets.Lib.Panel.javascript ++ "
 import * as React from 'react';
 import { useRpcSession } from '@leanprover/infoview';
 
 const e = React.createElement;
 
-export default function ProgressWidget() {
-  const RETAIN_DONE_MS = 20_000;
+export default function ProgressWidget(props) {
   const rpc = useRpcSession();
-  const [entries, setEntries] = React.useState([]);
+  const [settings, setSettings, resetSettings] = usePanelSettings({
+    autoRefresh: props?.autoRefresh !== false,
+    intervalMs: boundedNat(props?.intervalMs, 250, 100, 60000),
+    autoRemove: props?.autoRemove !== false,
+    retainDoneMs: boundedNat(props?.retainDoneMs, 20000, 1000, 3600000)
+  });
+  const autoEnabled = settings.autoRefresh;
+  const periodMs = settings.intervalMs;
+  const RETAIN_DONE_MS = settings.retainDoneMs;
+  const setAutoEnabled = (value) => setSettings((prev) => ({ ...prev, autoRefresh: value }));
+  const setPeriodMs = (value) => setSettings((prev) => ({ ...prev, intervalMs: value }));
+  // Requests and row IDs belong to one RPC session. A restarted worker may reuse IDs.
+  const session = React.useMemo(() => ({ inFlight: false, pendingDeleteIds: new Set(), deletedDuringRead: new Set() }), [rpc]);
+  const activeSession = React.useRef(null);
+  const [snapshot, setSnapshot] = React.useState(null);
+  const entries = snapshot?.session === session ? snapshot.entries : [];
   const [manualLoading, setManualLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
-  const [autoEnabled, setAutoEnabled] = React.useState(true);
-  const [periodMs, setPeriodMs] = React.useState(250);
-  const [serverNowNs, setServerNowNs] = React.useState(0);
-  const [serverNowAtMs, setServerNowAtMs] = React.useState(Date.now());
   const [, setClockTick] = React.useState(0);
-  const inFlight = React.useRef(false);
-  const pendingDeleteIds = React.useRef(new Set());
+
+  React.useEffect(() => {
+    activeSession.current = session;
+    setSnapshot(null);
+    setManualLoading(false);
+    setError(null);
+    return () => { activeSession.current = null; };
+  }, [session]);
 
   React.useEffect(() => {
     const id = setInterval(() => {
@@ -65,7 +95,9 @@ export default function ProgressWidget() {
     return () => clearInterval(id);
   }, []);
 
-  const estimatedNowNs = serverNowNs + Math.max(0, Date.now() - serverNowAtMs) * 1_000_000;
+  const estimatedNowNs = snapshot?.session === session
+    ? snapshot.nowNs + Math.max(0, Date.now() - snapshot.atMs) * 1_000_000
+    : 0;
 
   function formatMonoSeconds(ns) {
     if (!Number.isFinite(ns)) return 'n/a';
@@ -93,32 +125,35 @@ export default function ProgressWidget() {
     const n = Number(ns);
     if (!Number.isFinite(n)) return 'n/a';
     const elapsedMs = Math.max(0, (estimatedNowNs - n) / 1_000_000);
-    return `${formatDurationMs(elapsedMs)} ago`;
+    const duration = formatDurationMs(elapsedMs);
+    return duration === 'just now' ? duration : `${duration} ago`;
   }
 
   function statusIcon(status) {
     if (status === 'done') return '✓';
-    if (status === 'cancelled') return '⨯';
+    if (status === 'cancelled' || status === 'failed') return '⨯';
     return '●';
   }
 
   function statusLabel(status) {
     if (status === 'done') return 'Done';
     if (status === 'cancelled') return 'Cancelled';
+    if (status === 'failed') return 'Failed';
     return 'Running';
   }
 
   function rowBackground(status) {
     if (status === 'done') return 'rgba(40, 167, 69, 0.10)';
-    if (status === 'cancelled') return 'rgba(220, 53, 69, 0.11)';
+    if (status === 'cancelled' || status === 'failed') return 'rgba(220, 53, 69, 0.11)';
     return 'transparent';
   }
 
   function isClosedStatus(status) {
-    return status === 'done' || status === 'cancelled';
+    return status === 'done' || status === 'cancelled' || status === 'failed';
   }
 
   function getRemainingMs(entry) {
+    if (!settings.autoRemove) return null;
     if (!isClosedStatus(String(entry.status ?? ''))) return null;
     if (entry.closedAtNs === null || entry.closedAtNs === undefined) return null;
     const closedAtNs = Number(entry.closedAtNs);
@@ -132,10 +167,10 @@ export default function ProgressWidget() {
     if (remainingMs === null) return null;
     const ratio = Math.max(0, Math.min(1, remainingMs / RETAIN_DONE_MS));
     const sweepDeg = `${(ratio * 360).toFixed(1)}deg`;
-    return e('div', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem' } }, [
+    return e('div', { key: 'expiry', style: { display: 'inline-flex', alignItems: 'center', gap: '0.35rem' } }, [
       e('span', {
         key: 'ring',
-        title: `${Math.ceil(remainingMs / 1000)}s until auto-remove`,
+        title: `${Math.ceil(remainingMs / 1000)}s until deletion`,
         style: {
           width: '1rem',
           height: '1rem',
@@ -178,7 +213,7 @@ export default function ProgressWidget() {
       nodes.push(e('div', { key: 'label', style: { opacity: 0.9 } }, label));
     }
     if (hasTotal) {
-      nodes.push(e('div', { key: 'bar-wrap', style: { display: 'inline-flex', alignItems: 'center', gap: '0.45rem' } }, [
+      nodes.push(e('div', { key: 'bar-wrap', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem' } }, [
         e('span', {
           key: 'bar-outer',
           style: {
@@ -206,40 +241,46 @@ export default function ProgressWidget() {
   }
 
   const deleteEntry = React.useCallback(async (id) => {
+    if (activeSession.current !== session) return;
     if (!Number.isFinite(id)) return;
-    if (pendingDeleteIds.current.has(id)) return;
-    pendingDeleteIds.current.add(id);
+    if (session.pendingDeleteIds.has(id)) return;
+    session.pendingDeleteIds.add(id);
     try {
       await rpc.call('DevWidgets.PTracker.deleteProgressRefRpc', { id });
-      setEntries((prev) => prev.filter((entry) => Number(entry.id) !== id));
+      if (activeSession.current !== session) return;
+      // Only retain tombstones for the one read that could predate this deletion.
+      if (session.inFlight) session.deletedDuringRead.add(id);
+      setError(null);
+      setSnapshot((prev) => prev?.session === session
+        ? { ...prev, entries: prev.entries.filter((entry) => Number(entry.id) !== id) }
+        : prev);
     } catch (err) {
-      setError(String(err));
+      if (activeSession.current === session) setError(String(err));
     } finally {
-      pendingDeleteIds.current.delete(id);
+      session.pendingDeleteIds.delete(id);
     }
-  }, [rpc]);
+  }, [rpc, session]);
 
-  async function refreshNow(origin = 'manual') {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const refreshNow = React.useCallback(async (origin = 'manual') => {
+    if (activeSession.current !== session || session.inFlight) return;
+    session.inFlight = true;
     if (origin === 'manual') setManualLoading(true);
     setError(null);
     try {
       const next = await rpc.call('DevWidgets.PTracker.readProgressViewRpc', {});
-      const nextEntries = Array.isArray(next?.entries) ? next.entries : [];
-      setEntries(nextEntries);
+      if (activeSession.current !== session) return;
+      const nextEntries = (Array.isArray(next?.entries) ? next.entries : [])
+        .filter((entry) => !session.deletedDuringRead.has(Number(entry.id)));
       const nowNs = Number(next?.nowNs);
-      if (Number.isFinite(nowNs)) {
-        setServerNowNs(nowNs);
-        setServerNowAtMs(Date.now());
-      }
+      setSnapshot({ session, entries: nextEntries, nowNs: Number.isFinite(nowNs) ? nowNs : 0, atMs: Date.now() });
     } catch (err) {
-      setError(String(err));
+      if (activeSession.current === session) setError(String(err));
     } finally {
-      if (origin === 'manual') setManualLoading(false);
-      inFlight.current = false;
+      if (activeSession.current === session && origin === 'manual') setManualLoading(false);
+      session.inFlight = false;
+      session.deletedDuringRead.clear();
     }
-  }
+  }, [rpc, session]);
 
   React.useEffect(() => {
     if (!autoEnabled) return;
@@ -247,11 +288,11 @@ export default function ProgressWidget() {
       void refreshNow('auto');
     }, Math.max(100, periodMs));
     return () => clearInterval(id);
-  }, [autoEnabled, periodMs]);
+  }, [autoEnabled, periodMs, refreshNow]);
 
   React.useEffect(() => {
     void refreshNow('auto');
-  }, []);
+  }, [refreshNow]);
 
   React.useEffect(() => {
     for (const entry of entries) {
@@ -261,9 +302,10 @@ export default function ProgressWidget() {
         void deleteEntry(id);
       }
     }
-  }, [entries, estimatedNowNs, deleteEntry]);
+  }, [entries, estimatedNowNs, deleteEntry, settings.autoRemove, RETAIN_DONE_MS]);
 
   return e('div', { style: { display: 'grid', gap: '0.35rem' } }, [
+    e('strong', { key: 'title' }, 'Progress Tracker'),
     e('div', {
       key: 'controls',
       style: {
@@ -276,22 +318,24 @@ export default function ProgressWidget() {
     }, [
       e('label', { key: 'enabled', style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem' } }, [
         e('input', {
+          key: 'auto',
           type: 'checkbox',
           checked: autoEnabled,
           onChange: (ev) => setAutoEnabled(Boolean(ev.target.checked))
         }),
-        'Auto'
+        'Auto-refresh'
       ]),
       e('label', { key: 'period', style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem' } }, [
         'Every',
         e('input', {
+          key: 'period',
           type: 'number',
           min: 100,
           step: 100,
           value: periodMs,
           onChange: (ev) => {
             const n = Number(ev.target.value);
-            if (Number.isFinite(n)) setPeriodMs(Math.max(100, Math.floor(n)));
+            if (Number.isFinite(n)) setPeriodMs(boundedNat(n, 250, 100, 60000));
           },
           disabled: !autoEnabled,
           style: { width: '4.7rem', padding: '0 0.2rem', lineHeight: '1.2rem' }
@@ -303,69 +347,68 @@ export default function ProgressWidget() {
         onClick: () => void refreshNow('manual'),
         disabled: manualLoading,
         style: { padding: '0 0.4rem', lineHeight: '1.2rem' }
-      }, manualLoading ? 'Refreshing...' : 'Refresh')
+      }, manualLoading ? 'Refreshing...' : 'Refresh'),
+      panelButton('Reset panel', resetSettings, false, 'Restore the configuration supplied by the Lean file.')
     ]),
-    e('div', { key: 'rows', style: { display: 'grid', gap: '0.3rem' } }, [
+    e('details', { key: 'settings' }, [
+      e('summary', { key: 'summary' }, 'Progress settings'),
+      e('div', { key: 'presets', style: { display: 'flex', flexWrap: 'wrap', gap: '0.4rem' } }, [
+        panelButton('Live', () => setSettings({ autoRefresh: true, intervalMs: 250, autoRemove: true, retainDoneMs: 20000 })),
+        panelButton('Quiet', () => setSettings({ autoRefresh: true, intervalMs: 1000, autoRemove: true, retainDoneMs: 60000 })),
+        panelButton('Manual', () => setSettings((prev) => ({ ...prev, autoRefresh: false, autoRemove: false })))
+      ]),
+      e('label', { key: 'auto-remove' }, [
+        e('input', { key: 'enabled', type: 'checkbox', checked: settings.autoRemove,
+          onChange: (ev) => setSettings((prev) => ({ ...prev, autoRemove: Boolean(ev.target.checked) })) }),
+        'Delete completed tasks automatically'
+      ]),
+      e('label', { key: 'retention' }, [
+        ' Keep for ',
+        e('input', { key: 'seconds', type: 'number', min: 1, max: 3600, value: settings.retainDoneMs / 1000,
+          disabled: !settings.autoRemove, style: { width: '4.5rem' },
+          onChange: (ev) => setSettings((prev) => ({ ...prev,
+            retainDoneMs: boundedNat(Number(ev.target.value) * 1000, 20000, 1000, 3600000) })) }),
+        ' seconds'
+      ])
+    ]),
+    e('div', { key: 'retention-status', role: 'status', style: { fontSize: '0.85em' } },
+      settings.autoRemove
+        ? `Completed tasks are deleted from all panels after ${RETAIN_DONE_MS / 1000} seconds. Auto-refresh does not control deletion.`
+        : 'Completed tasks are kept until you delete them. Deletion affects all panels in this file.'),
+    e('div', { key: 'rows', style: { display: 'grid', gap: '0.5rem', minWidth: 0 } }, [
       entries.length === 0
         ? e('em', { key: 'empty' }, 'No tracked progress refs.')
-        : e('table', { key: 'table', style: { borderCollapse: 'collapse', width: '100%' } }, [
-            e('thead', { key: 'thead' }, e('tr', {}, [
-              e('th', { key: 'h-id', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Ref'),
-              e('th', { key: 'h-st', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'St'),
-              e('th', { key: 'h-value', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Value'),
-              e('th', { key: 'h-created', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Age'),
-              e('th', { key: 'h-updated', style: { textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' } }, 'Updated'),
-              e('th', { key: 'h-actions', style: { textAlign: 'right', padding: '0.2rem 0 0.2rem 0' } }, 'Actions')
-            ])),
-            e('tbody', { key: 'tbody' }, entries.map((entry) => {
-              const status = String(entry.status ?? 'running');
-              const isClosed = isClosedStatus(status);
-              const idNum = Number(entry.id);
-              const deleting = pendingDeleteIds.current.has(idNum);
-              const createdNs = Number(entry.createdAtNs);
-              const updatedNs = Number(entry.lastUpdatedAtNs);
-              return e('tr', {
-                key: String(entry.id),
-                style: {
-                  opacity: isClosed ? 0.62 : 1,
-                  background: rowBackground(status)
-                }
-              }, [
-                e('td', { key: 'id', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, `#${entry.id}`),
-                e('td', { key: 'status', style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' }, title: statusLabel(status) }, statusIcon(status)),
-                e('td', { key: 'value', style: { padding: '0.2rem 0.5rem 0.2rem 0' } }, renderValue(entry)),
-                e('td', {
-                  key: 'created',
-                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
-                  title: `created @ ${formatMonoSeconds(createdNs)}`
-                }, formatElapsedSince(createdNs)),
-                e('td', {
-                  key: 'updated',
-                  style: { padding: '0.2rem 0.5rem 0.2rem 0', fontFamily: 'monospace' },
-                  title: `updated @ ${formatMonoSeconds(updatedNs)}`
-                }, formatElapsedSince(updatedNs)),
-                e('td', {
-                  key: 'actions',
-                  style: {
-                    padding: '0.2rem 0 0.2rem 0',
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    alignItems: 'center',
-                    gap: '0.35rem'
-                  }
-                }, isClosed ? [
-                  renderExpiry(entry),
-                  e('button', {
-                    key: 'remove',
-                    title: 'Remove from view now',
-                    onClick: () => void deleteEntry(idNum),
-                    disabled: deleting,
-                    style: { padding: '0 0.35rem', lineHeight: '1.1rem' }
-                  }, deleting ? '...' : '×')
-                ] : null)
-              ]);
-            }))
-          ])
+        : entries.map((entry) => {
+            const status = String(entry.status ?? 'running');
+            const isClosed = isClosedStatus(status);
+            const idNum = Number(entry.id);
+            const deleting = session.pendingDeleteIds.has(idNum);
+            return e('article', {
+              key: String(entry.id),
+              'aria-label': String(entry.description || `Task ${entry.id}`),
+              style: { minWidth: 0, padding: '0.5rem', border: '1px solid var(--vscode-editorWidget-border)',
+                borderRadius: '6px', background: rowBackground(status), overflowWrap: 'anywhere' }
+            }, [
+              e('div', { key: 'header', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' } }, [
+                e('span', { key: 'status' }, `${statusIcon(status)} ${statusLabel(status)} · #${entry.id}`),
+                isClosed ? e('button', {
+                  key: 'delete', type: 'button',
+                  title: 'Delete this completed task from the shared registry for this file.',
+                  'aria-label': `Delete task ${entry.id}: ${entry.description || ''}`,
+                  onClick: () => void deleteEntry(idNum), disabled: deleting,
+                  style: { marginLeft: 'auto', minHeight: '26px', padding: '0.15rem 0.45rem' }
+                }, deleting ? 'Deleting…' : 'Delete') : null,
+                isClosed ? renderExpiry(entry) : null
+              ]),
+              e('div', { key: 'value', style: { minWidth: 0 } }, renderValue(entry)),
+              e('div', { key: 'times', style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem 1rem', marginTop: '0.35rem', fontSize: '0.85em' } }, [
+                e('span', { key: 'created', title: `created @ ${formatMonoSeconds(Number(entry.createdAtNs))}` },
+                  `Created ${formatElapsedSince(entry.createdAtNs)}`),
+                e('span', { key: 'updated', title: `updated @ ${formatMonoSeconds(Number(entry.lastUpdatedAtNs))}` },
+                  `Updated ${formatElapsedSince(entry.lastUpdatedAtNs)}`)
+              ])
+            ]);
+          })
     ]),
     error ? e('pre', { key: 'err', style: { color: 'var(--vscode-errorForeground)', margin: 0 } }, error) : null
   ]);

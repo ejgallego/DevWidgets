@@ -7,3 +7,4 @@ Author: Emilio J. Gallego Arias
 -- This module serves as the root of the `DevWidgets.Lib` library.
 import DevWidgets.Lib.Resource
 import DevWidgets.Lib.AtPos
+import DevWidgets.Lib.Commands

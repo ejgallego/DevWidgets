@@ -4,8 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import DevWidgets.InfoTreeExplorer.InfoTreeExplorer
+import DevWidgets.InfoTreeExplorer.API
 import Lean.Widget.Commands
 
-open DevWidgets.InfoTreeExplorer in
-show_panel_widgets [infoTreeExplorerWidget]
+show_panel_widgets [DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget]

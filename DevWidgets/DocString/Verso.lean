@@ -69,40 +69,50 @@ private def renderDocCodeInlineHtml (code : Lean.Doc.DocCode) (cls := "lean-term
   let body := renderDocCodeBody code
   s!"<code class=\"lean-ref {cls}\">{body}</code>"
 
-private def renderSpecialInline? (container : ElabInline) (body : String) : Option String :=
-  if let some c := container.val.get? (α := Lean.Doc.Data.Const) then
+private def renderSpecialInline? (container : ElabInline) (body : String) : Option String := do
+  let .custom val := container | none
+  if let some c := val.get? (α := Lean.Doc.Data.Const) then
     some s!"<code class=\"lean-ref lean-const\" title=\"{htmlEscape (toString c.name)}\">{body}</code>"
-  else if let some t := container.val.get? (α := Lean.Doc.Data.LeanTerm) then
+  else if let some t := val.get? (α := Lean.Doc.Data.LeanTerm) then
     some (renderDocCodeInlineHtml t.term "lean-term")
-  else if let some v := container.val.get? (α := Lean.Doc.Data.Local) then
+  else if let some v := val.get? (α := Lean.Doc.Data.Local) then
     let title := s!"{v.name} : {v.type}"
     some s!"<code class=\"lean-ref lean-var\" title=\"{htmlEscape title}\">{body}</code>"
-  else if let some f := container.val.get? (α := Lean.Doc.Data.Tactic) then
+  else if let some f := val.get? (α := Lean.Doc.Data.Tactic) then
     some s!"<code class=\"lean-ref lean-tactic\" title=\"{htmlEscape (toString f.name)}\">{body}</code>"
-  else if let some c := container.val.get? (α := Lean.Doc.Data.ConvTactic) then
+  else if let some c := val.get? (α := Lean.Doc.Data.ConvTactic) then
     some s!"<code class=\"lean-ref lean-tactic\" title=\"{htmlEscape (toString c.name)}\">{body}</code>"
-  else if let some o := container.val.get? (α := Lean.Doc.Data.Option) then
+  else if let some o := val.get? (α := Lean.Doc.Data.Option) then
     some s!"<code class=\"lean-ref lean-option\" title=\"{htmlEscape (toString o.name)}\">{body}</code>"
-  else if let some o := container.val.get? (α := Lean.Doc.Data.SetOption) then
+  else if let some o := val.get? (α := Lean.Doc.Data.SetOption) then
     some (renderDocCodeInlineHtml o.term "lean-option")
-  else if let some s := container.val.get? (α := Lean.Doc.Data.SyntaxCat) then
+  else if let some s := val.get? (α := Lean.Doc.Data.SyntaxCat) then
     some s!"<code class=\"lean-ref lean-syntax\" title=\"{htmlEscape (toString s.name)}\">{body}</code>"
-  else if let some s := container.val.get? (α := Lean.Doc.Data.Syntax) then
+  else if let some s := val.get? (α := Lean.Doc.Data.Syntax) then
     some s!"<code class=\"lean-ref lean-syntax\" title=\"{htmlEscape (toString s.category)}\">{body}</code>"
-  else if let some m := container.val.get? (α := Lean.Doc.Data.ModuleName) then
+  else if let some m := val.get? (α := Lean.Doc.Data.ModuleName) then
     some s!"<code class=\"lean-ref lean-module\" title=\"{htmlEscape (toString m.module)}\">{body}</code>"
   else
     none
 
-private def renderSpecialBlock? (container : ElabBlock) : Option String :=
-  if let some b := container.val.get? (α := Lean.Doc.Data.LeanBlock) then
+private def renderSpecialBlock? (container : ElabBlock) : Option String := do
+  let .custom val := container | none
+  if let some b := val.get? (α := Lean.Doc.Data.LeanBlock) then
     some (renderDocCodeHtml b.commands)
-  else if let some t := container.val.get? (α := Lean.Doc.Data.LeanTerm) then
+  else if let some t := val.get? (α := Lean.Doc.Data.LeanTerm) then
     some (renderDocCodeHtml t.term)
-  else if let some o := container.val.get? (α := Lean.Doc.Data.SetOption) then
+  else if let some o := val.get? (α := Lean.Doc.Data.SetOption) then
     some (renderDocCodeHtml o.term)
   else
     none
+
+/-- Permit ordinary web/mail links, fragments and relative paths; reject executable schemes. -/
+def safeDocUrl (url : String) : Bool :=
+  let url := url.trimAscii.toString
+  let lower := url.toLower
+  !url.toList.any (fun c => c.toNat < 32 || c.toNat == 127) &&
+    (!url.contains ':' || lower.startsWith "https://" || lower.startsWith "http://" ||
+      lower.startsWith "mailto:")
 
 mutual
   private partial def renderInlineHtml (inl : Doc.Inline ElabInline) : String :=
@@ -115,11 +125,15 @@ mutual
     | .math .display s => s!"<div class=\"math-display\">{htmlEscape s}</div>"
     | .linebreak _ => " "
     | .link content url =>
-      s!"<a href=\"{htmlEscape url}\">{renderInlinesHtml content}</a>"
+      if safeDocUrl url then
+        s!"<a href=\"{htmlEscape url}\">{renderInlinesHtml content}</a>"
+      else renderInlinesHtml content
     | .footnote name content =>
       s!"<sup class=\"footnote-ref\">{htmlEscape name}</sup><span class=\"footnote-body\">{renderInlinesHtml content}</span>"
     | .image alt url =>
-      s!"<img alt=\"{htmlEscape alt}\" src=\"{htmlEscape url}\" />"
+      if safeDocUrl url then
+        s!"<img alt=\"{htmlEscape alt}\" src=\"{htmlEscape url}\" />"
+      else htmlEscape alt
     | .concat content => renderInlinesHtml content
     | .other container content =>
       let body := renderInlinesHtml content

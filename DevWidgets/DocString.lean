@@ -6,8 +6,8 @@ Author: Emilio J. Gallego Arias
 
 module
 
-import DevWidgets.DocString.Widget
-import Lean.Widget.Commands
+public import DevWidgets.DocString.API
+public meta import DevWidgets.DocString.API
+meta import Lean.Widget.Commands
 
-open DevWidgets.DocString in
-show_panel_widgets [docStringWidget]
+show_panel_widgets [DevWidgets.DocString.docStringWidget]

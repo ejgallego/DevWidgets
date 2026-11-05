@@ -5,11 +5,11 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
+import DevWidgets.Lib.Panel
 import Lean.Data.Lsp
 import Lean.Server
 import Lean.Widget.UserWidget
 import DevWidgets.Lib.AtPos
--- import ProofWidgets.Component.Panel.Basic
 
 namespace DevWidgets.InfoTreeExplorer
 
@@ -17,12 +17,41 @@ open Lean
 open Lean Elab
 open Lean.Server.FileWorker
 open Lean Server Lsp RequestM
--- open ProofWidgets
 
 structure InfoTreeAtPosParams where
   pos : Lsp.Position
-  uri? : Option DocumentUri := none
+  maxChildren? : Option Nat := none
+  maxDepth? : Option Nat := none
+  maxNodes? : Option Nat := none
   deriving FromJson, ToJson
+
+/-- Limits for inspection and rendering. These do not change Lean's elaboration info collection. -/
+structure Config where
+  maxChildren : Nat := 30
+  maxDepth : Nat := 32
+  /-- Maximum nodes inspected per tree, including context wrappers. -/
+  maxNodes : Nat := 4096
+  deriving FromJson, ToJson
+
+/-- A compact tree for following local elaboration. -/
+def Config.focused : Config := { maxChildren := 10, maxDepth := 12, maxNodes := 1024 }
+
+/-- More context for investigating complex elaboration. -/
+def Config.detailed : Config := { maxChildren := 60, maxDepth := 48, maxNodes := 8192 }
+
+/-- Bound client-supplied rendering limits. -/
+def Config.bounded (config : Config) : Config := {
+  maxChildren := max 1 (min 100 config.maxChildren)
+  maxDepth := max 1 (min 64 config.maxDepth)
+  maxNodes := max 1 (min 16384 config.maxNodes)
+}
+
+/-- Presentation-independent focused node data. Paths contain labels, not a delimited string. -/
+structure FocusedPreview where
+  title : String
+  path : Array String
+  output : String
+  deriving Inhabited, ToJson, FromJson, Server.RpcEncodable
 
 structure ExplorerCapture where
   summary : String := "No infotree summary captured yet. Move the cursor in a Lean file to populate this panel."
@@ -30,7 +59,8 @@ structure ExplorerCapture where
   stxTree : Option Json := none
   facts : Array (String × String) := #[]
   cursorPath : Array String := #[]
-  focused : Array String := #[]
+  focused : Array FocusedPreview := #[]
+  truncated : Bool := false
   deriving Inhabited, Server.RpcEncodable
 
 meta def stxContainsPos (stx : Syntax) (p : String.Pos.Raw) : Bool :=
@@ -60,6 +90,7 @@ meta def infoTag (info : Elab.Info) : String :=
   | .ofFieldRedeclInfo _ => "fieldRedecl"
   | .ofDelabTermInfo _ => "delabTerm"
   | .ofChoiceInfo _ => "choice"
+  | .ofChoiceResolutionInfo _ => "choiceResolution"
   | .ofDocInfo _ => "doc"
   | .ofDocElabInfo _ => "docElab"
 
@@ -75,12 +106,6 @@ meta def bumpTagCount (tag : String) (counts : List (String × Nat)) : List (Str
 meta def infoTagSummary (tree : Elab.InfoTree) : List (String × Nat) :=
   tree.foldInfo (init := []) fun _ctx info acc =>
     bumpTagCount (infoTag info) acc
-
-meta def spaces : Nat → String
-  | 0 => ""
-  | n + 1 => " " ++ spaces n
-
-meta def indent (depth : Nat) : String := spaces (2 * depth)
 
 meta def formatRange (text : FileMap) (stx : Syntax) : String :=
   match stx.getRange? with
@@ -120,7 +145,7 @@ meta def listMaxByLength (xs : List (List String)) : List String :=
     if best.length < x.length then x else best
 
 meta partial def pathToCursor (text : FileMap) (pos : String.Pos.Raw) : Elab.InfoTree → List String
-  | .hole id => [s!"hole {id.name}"]
+  | .hole _ => []
   | .context pc tree =>
     let child := pathToCursor text pos tree
     if child.isEmpty then [] else s!"context[{partialCtxTag pc}]" :: child
@@ -169,17 +194,6 @@ meta def elaborationOutputPreview : Elab.Info → String
   | .ofDocElabInfo i => s!"doc-elab name={i.name} kind={reprStr i.kind}"
   | other => truncateStr 220 s!"{infoTag other}"
 
-meta def renderContainmentPath (nodes : List String) : String :=
-  let rec go (depth : Nat) : List String → List String
-    | [] => []
-    | n :: rest =>
-      let line := s!"{indent depth}- {n}"
-      line :: go (depth + 1) rest
-  if nodes.isEmpty then
-    "- _none_"
-  else
-    String.intercalate "\n" (go 0 nodes)
-
 meta partial def focusedPathsWithInfo (text : FileMap) (pos : String.Pos.Raw) :
     Elab.InfoTree → List (Elab.Info × List String)
   | .hole _ => []
@@ -203,35 +217,6 @@ meta def treeJsonExt (label : String) (children : Array Json := #[]) (extra : Li
 
 meta def treeJson (label : String) (children : Array Json := #[]) : Json :=
   treeJsonExt label children
-
-inductive CtxDiffMode where
-  | lite
-  | full
-
-def ctxDiffModeDefault : CtxDiffMode := .lite
-
-meta def short (max : Nat) (s : String) : String :=
-  if s.length <= max then s else (s.take max).toString ++ "..."
-
-meta def envStructuralFingerprint (env : Environment) : String :=
-  s!"imports={env.allImportedModuleNames.size}, consts={env.constants.toList.length}"
-
-meta def cmdEnvStructuralFingerprint (env? : Option Environment) : String :=
-  match env? with
-  | none => "none"
-  | some env => envStructuralFingerprint env
-
-meta def fileMapFingerprint (fm : FileMap) : String :=
-  s!"bytes={fm.source.length}, hash={hash fm.source}"
-
-meta def mctxFingerprint (mctx : MetavarContext) : String :=
-  s!"depth={mctx.depth}, lDepth={mctx.levelAssignDepth}, mvarCtr={mctx.mvarCounter}, decls={mctx.decls.toList.length}, eAssign={mctx.eAssignment.toList.length}, lAssign={mctx.lAssignment.toList.length}, dAssign={mctx.dAssignment.toList.length}"
-
-meta def optionsFingerprint (opts : Options) : String :=
-  s!"hasTrace={opts.hasTrace}, hash={hash (toString opts)}"
-
-meta def openDeclsFingerprint (ods : List OpenDecl) : String :=
-  s!"count={ods.length}, hash={hash (String.intercalate "|" (ods.map toString))}"
 
 meta def ngenFingerprint (ngen : NameGenerator) : String :=
   s!"prefix={ngen.namePrefix}, idx={ngen.idx}"
@@ -261,45 +246,6 @@ meta def commandCtxDiffFieldsLite (parent curr : Elab.CommandContextInfo) : List
     diffs := s!"ngen {ngenFingerprint parent.ngen} -> {ngenFingerprint curr.ngen}" :: diffs
   diffs.reverse
 
-meta def commandCtxDiffFieldsFull (parent curr : Elab.CommandContextInfo) : List String := Id.run do
-  let mut diffs : List String := []
-  if parent.currNamespace != curr.currNamespace then
-    diffs := s!"namespace {parent.currNamespace} -> {curr.currNamespace}" :: diffs
-  let pEnv := envStructuralFingerprint parent.env
-  let cEnv := envStructuralFingerprint curr.env
-  if pEnv != cEnv then
-    diffs := s!"env {short 120 pEnv} -> {short 120 cEnv}" :: diffs
-  let pCmdEnv := cmdEnvStructuralFingerprint parent.cmdEnv?
-  let cCmdEnv := cmdEnvStructuralFingerprint curr.cmdEnv?
-  if pCmdEnv != cCmdEnv then
-    diffs := s!"cmdEnv? {short 120 pCmdEnv} -> {short 120 cCmdEnv}" :: diffs
-  let pFM := fileMapFingerprint parent.fileMap
-  let cFM := fileMapFingerprint curr.fileMap
-  if pFM != cFM then
-    diffs := s!"fileMap {pFM} -> {cFM}" :: diffs
-  let pMctx := mctxFingerprint parent.mctx
-  let cMctx := mctxFingerprint curr.mctx
-  if pMctx != cMctx then
-    diffs := s!"mctx {short 140 pMctx} -> {short 140 cMctx}" :: diffs
-  let pOpts := optionsFingerprint parent.options
-  let cOpts := optionsFingerprint curr.options
-  if pOpts != cOpts then
-    diffs := s!"options {pOpts} -> {cOpts}" :: diffs
-  let pOpen := openDeclsFingerprint parent.openDecls
-  let cOpen := openDeclsFingerprint curr.openDecls
-  if parent.openDecls != curr.openDecls then
-    diffs := s!"openDecls {pOpen} -> {cOpen}" :: diffs
-  let pNgen := ngenFingerprint parent.ngen
-  let cNgen := ngenFingerprint curr.ngen
-  if pNgen != cNgen then
-    diffs := s!"ngen {pNgen} -> {cNgen}" :: diffs
-  diffs.reverse
-
-meta def commandCtxDiffFields (mode : CtxDiffMode) (parent curr : Elab.CommandContextInfo) : List String :=
-  match mode with
-  | .lite => commandCtxDiffFieldsLite parent curr
-  | .full => commandCtxDiffFieldsFull parent curr
-
 structure CommandCtxDelta where
   changed : Bool
   summary : String
@@ -321,19 +267,17 @@ meta def commandCtxDelta (parent? : Option Elab.CommandContextInfo) (curr : Elab
   match parent? with
   | none => { changed := false, summary := "no immediate ancestor", tooltip := "no immediate ancestor" }
   | some parent =>
-    let mode := ctxDiffModeDefault
-    let diffs := commandCtxDiffFields mode parent curr
+    let diffs := commandCtxDiffFieldsLite parent curr
     let mmDetails := commandCtxMainModuleDetails parent curr
     let mmChanged := !mmDetails.isEmpty
     if diffs.isEmpty then
       { changed := false, summary := "identical to immediate ancestor", tooltip := "identical to immediate ancestor" }
     else
-      let modeTag := match mode with | .lite => "lite" | .full => "full"
       let summary :=
         if mmChanged then
-          s!"changed [{modeTag}] (mainModule): {String.intercalate "; " diffs}"
+          s!"changed [lite] (mainModule): {String.intercalate "; " diffs}"
         else
-          s!"changed [{modeTag}]: {String.intercalate "; " diffs}"
+          s!"changed [lite]: {String.intercalate "; " diffs}"
       let tooltip :=
         if mmChanged then
           summary ++ "\n" ++ String.intercalate "\n" mmDetails
@@ -344,7 +288,9 @@ meta def commandCtxDelta (parent? : Option Elab.CommandContextInfo) (curr : Elab
 meta def stxLabel (text : FileMap) (stx : Syntax) : String :=
   let range := formatRange text stx
   match stx with
-  | .node _ kind args => s!"syntax.node {kind} (children={args.size}) @{range}"
+  | .node _ kind args =>
+    if kind == `DevWidgets.truncated then "... (capture limit reached)"
+    else s!"syntax.node {kind} (children={args.size}) @{range}"
   | .atom _ val => s!"syntax.atom \"{truncateStr 40 val}\" @{range}"
   | .ident _ _ val _ => s!"syntax.ident {val} @{range}"
   | .missing => "syntax.missing"
@@ -352,16 +298,20 @@ meta def stxLabel (text : FileMap) (stx : Syntax) : String :=
 meta partial def infoTreeToExplorerTree
     (text : FileMap)
     (maxChildren : Nat := 30)
-    : Option Elab.CommandContextInfo → Elab.InfoTree → Json
-  | _, .hole id =>
-    treeJson s!"hole {id.name}"
-  | parentCommandCtx?, .context pc tree =>
+    (parentCommandCtx? : Option Elab.CommandContextInfo) (tree : Elab.InfoTree)
+    (maxDepth : Nat := 32) : Json :=
+  if maxDepth == 0 then treeJson "... (depth limit reached)" else
+  match tree with
+  | .hole id =>
+    if id.name == `DevWidgets.truncated then treeJson "... (capture limit reached)"
+    else treeJson s!"hole {id.name}"
+  | .context pc tree =>
     match pc with
     | .commandCtx ctx =>
       let delta := commandCtxDelta parentCommandCtx? ctx
       treeJsonExt
         s!"context[commandCtx] ({delta.summary})"
-        #[infoTreeToExplorerTree text maxChildren (some ctx) tree]
+        #[infoTreeToExplorerTree text maxChildren (some ctx) tree (maxDepth - 1)]
         [ ("nodeType", Json.str "commandCtx")
         , ("commandCtxChanged", Json.bool delta.changed)
         , ("commandCtxMainModuleChanged", Json.bool delta.mainModuleChanged)
@@ -369,13 +319,13 @@ meta partial def infoTreeToExplorerTree
         ]
     | .parentDeclCtx parentDecl =>
       treeJson s!"context[parentDecl={parentDecl}]"
-        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree]
+        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree (maxDepth - 1)]
     | .autoImplicitCtx implicits =>
       treeJson s!"context[autoImplicit={implicits.size}]"
-        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree]
-  | parentCommandCtx?, .node info children =>
+        #[infoTreeToExplorerTree text maxChildren parentCommandCtx? tree (maxDepth - 1)]
+  | .node info children =>
     let renderedChildren :=
-      children.toList.take maxChildren |>.map (infoTreeToExplorerTree text maxChildren parentCommandCtx?)
+      children.toList.take maxChildren |>.map (fun child => infoTreeToExplorerTree text maxChildren parentCommandCtx? child (maxDepth - 1))
     let childArray := renderedChildren.toArray
     let childArray :=
       if children.size > maxChildren then
@@ -387,7 +337,9 @@ meta partial def infoTreeToExplorerTree
 meta partial def stxToExplorerTree
     (text : FileMap)
     (maxChildren : Nat := 40)
-    : Syntax → Json
+    (stx : Syntax) (maxDepth : Nat := 32) : Json :=
+  if maxDepth == 0 then treeJson "... (depth limit reached)" else
+  match stx with
   | .missing =>
     treeJson "syntax.missing"
   | stx@(.atom ..) =>
@@ -396,7 +348,7 @@ meta partial def stxToExplorerTree
     treeJson (stxLabel text stx)
   | stx@(.node _ _ args) =>
     let renderedChildren :=
-      args.toList.take maxChildren |>.map (stxToExplorerTree text maxChildren)
+      args.toList.take maxChildren |>.map (fun child => stxToExplorerTree text maxChildren child (maxDepth - 1))
     let childArray := renderedChildren.toArray
     let childArray :=
       if args.size > maxChildren then
@@ -404,50 +356,6 @@ meta partial def stxToExplorerTree
       else
         childArray
     treeJson (stxLabel text stx) childArray
-
-meta def sampleForTag (text : FileMap) (tree : Elab.InfoTree) (tag : String) (max : Nat) : List String :=
-  tree.foldInfo (init := []) fun _ctx info acc =>
-    if infoTag info == tag && acc.length < max then
-      acc ++ [infoNodeLabel text info]
-    else
-      acc
-
-meta def renderTagSummary (tags : Array (String × Nat)) : String :=
-  if tags.isEmpty then
-    "_none_"
-  else
-    String.intercalate ", " <| tags.toList.map fun (tag, n) => s!"`{tag}`={n}"
-
-meta def renderFocusedChains
-    (text : FileMap)
-    (focused : List (Elab.Info × List String))
-    : String :=
-  if focused.isEmpty then
-    "- _none_"
-  else
-    let rec chains (i : Nat) : List (Elab.Info × List String) → List String
-      | [] => []
-      | (info, chainPath) :: rest =>
-        let header := s!"- chain {i}"
-        let pathLines := (renderContainmentPath chainPath).splitOn "\n"
-        let details := s!"  detail: {focusedNodeDetail text info}"
-        let output := s!"  output: {elaborationOutputPreview info}"
-        header :: pathLines ++ [details, output] ++ chains (i + 1) rest
-    String.intercalate "\n" (chains 1 focused)
-
-meta def renderTagHeatmap
-    (text : FileMap)
-    (tree : Elab.InfoTree)
-    (tags : Array (String × Nat))
-    : String :=
-  let heatmapRows :=
-    tags.toList.map fun (tag, n) =>
-      let samples := sampleForTag text tree tag 2
-      let sampleTxt :=
-        if samples.isEmpty then "no samples"
-        else String.intercalate " | " samples
-      s!"- `{tag}`: {n}  (samples: {sampleTxt})"
-  if heatmapRows.isEmpty then "- _none_" else String.intercalate "\n" heatmapRows
 
 meta def customInfoNodesAtPosCount (tree : Elab.InfoTree) (pos : String.Pos.Raw) : Nat :=
   let customAtPos : List Unit :=
@@ -459,18 +367,9 @@ meta def customInfoNodesAtPosCount (tree : Elab.InfoTree) (pos : String.Pos.Raw)
   customAtPos.length
 
 meta def focusedPreviewItems
-    (text : FileMap)
-    (focused : List (Elab.Info × List String))
-    : Array String :=
-  let rec go (i : Nat) : List (Elab.Info × List String) → List String
-    | [] => []
-    | (info, chainPath) :: rest =>
-      let path := String.intercalate " > " chainPath
-      let detail := focusedNodeDetail text info
-      let output := elaborationOutputPreview info
-      let item := s!"{i}. {detail}\n   path: {path}\n   output: {output}"
-      item :: go (i + 1) rest
-  (go 1 focused).toArray
+    (text : FileMap) (focused : List (Elab.Info × List String)) : Array FocusedPreview :=
+  focused.toArray.map fun (info, path) =>
+    { title := focusedNodeDetail text info, path := path.toArray, output := elaborationOutputPreview info }
 
 meta def snapshotFacts
     (position : Lsp.Position)
@@ -489,44 +388,85 @@ meta def snapshotFacts
    , ("Custom nodes @ cursor", toString customAtPosCount)
    ]
 
-meta def captureSummaryText
-    (text : FileMap)
-    (uri? : Option DocumentUri)
-    (position : Lsp.Position)
-    (snap : Lean.Server.Snapshots.Snapshot)
-    (pos : String.Pos.Raw)
-    : String :=
-  let infoTree := Lean.Server.Snapshots.Snapshot.infoTree snap
-  let infoNodeCount := infoTree.foldInfo (init := 0) fun _ctx _info n => n + 1
-  let subtrees := rootSubtreeCount infoTree
-  let tags := (infoTagSummary infoTree).toArray.qsort (fun a b => a.1 < b.1)
-  let tagsSummary := renderTagSummary tags
-  let path := pathToCursor text pos infoTree
-  let pathStr := renderContainmentPath path
-  let focused := (focusedPathsWithInfo text pos infoTree).take 8
-  let focusedStr := renderFocusedChains text focused
-  let heatmapStr := renderTagHeatmap text infoTree tags
-  let customAtPosCount := customInfoNodesAtPosCount infoTree pos
-  s!"**InfoTree Explorer**\n\n## Snapshot\n- uri: `{reprStr uri?}`\n- cursor: `{position.line}:{position.character}`\n- syntax kind: `{snap.stx.getKind}`\n- end position (utf8): `{Lean.Server.Snapshots.Snapshot.endPos snap}`\n- module: `{(Lean.Server.Snapshots.Snapshot.env snap).mainModule}`\n- messages: `{(Lean.Server.Snapshots.Snapshot.msgLog snap).toArray.size}`\n- has errors: `{(Lean.Server.Snapshots.Snapshot.msgLog snap).hasErrors}`\n- infotree: root subtrees=`{subtrees}`, info nodes=`{infoNodeCount}`\n- infotree tags: {tagsSummary}\n- custom info nodes at cursor: `{customAtPosCount}`\n\n## Path To Cursor (outer -> inner)\n{pathStr}\n\n## Focused Nodes At Cursor (containment chains)\n{focusedStr}\n\n## Tag Heatmap + Samples\n{heatmapStr}"
+private structure CaptureBudget where
+  remaining : Nat
+  truncated : Bool := false
+
+private def takeCaptureNode : StateM CaptureBudget Bool := do
+  let st ← get
+  if st.remaining == 0 then
+    modify fun s => { s with truncated := true }
+    return false
+  modify fun s => { s with remaining := s.remaining - 1 }
+  return true
+
+/-- Bound traversal before collecting facts, paths, or rendering. Never descend beyond `depth`. -/
+private def limitInfoTree (tree : Elab.InfoTree) (depth : Nat) : StateM CaptureBudget Elab.InfoTree := do
+  let truncated : Elab.InfoTree := .hole ⟨`DevWidgets.truncated⟩
+  match depth with
+  | 0 =>
+    modify fun s => { s with truncated := true }
+    return truncated
+  | depth + 1 =>
+    unless ← takeCaptureNode do return truncated
+    match tree with
+    | .hole _ => return tree
+    | .context ctx child => return .context ctx (← limitInfoTree child depth)
+    | .node info children =>
+      let mut out := PersistentArray.empty
+      for child in children do
+        if (← get).remaining == 0 then
+          modify fun s => { s with truncated := true }
+          out := out.push truncated
+          break
+        out := out.push (← limitInfoTree child depth)
+      return .node info out
+
+private def limitSyntax (stx : Syntax) (depth : Nat) : StateM CaptureBudget Syntax := do
+  match depth with
+  | 0 =>
+    modify fun s => { s with truncated := true }
+    return .node .none `DevWidgets.truncated #[]
+  | depth + 1 =>
+    unless ← takeCaptureNode do return .node .none `DevWidgets.truncated #[]
+    match stx with
+    | .node info kind children =>
+      let mut out := #[]
+      for child in children do
+        if (← get).remaining == 0 then
+          modify fun s => { s with truncated := true }
+          out := out.push (.node .none `DevWidgets.truncated #[])
+          break
+        out := out.push (← limitSyntax child depth)
+      return .node info kind out
+    | _ => return stx
+
+/-- Returns a bounded copy and whether information was omitted. -/
+meta def boundedInfoTree (tree : Elab.InfoTree) (config : Config) : Elab.InfoTree × Bool :=
+  let config := config.bounded
+  let (tree, state) := (limitInfoTree tree config.maxDepth).run { remaining := config.maxNodes }
+  (tree, state.truncated)
 
 meta def captureSummary
     (text : FileMap)
-    (uri? : Option DocumentUri)
     (position : Lsp.Position)
     (snap : Lean.Server.Snapshots.Snapshot)
     (pos : String.Pos.Raw)
-    : ExplorerCapture :=
-  let infoTree := Lean.Server.Snapshots.Snapshot.infoTree snap
+    (config : Config := {}) : ExplorerCapture :=
+  let config := config.bounded
+  let (infoTree, infoTruncated) := boundedInfoTree (Lean.Server.Snapshots.Snapshot.infoTree snap) config
+  let (stx, syntaxBudget) := (limitSyntax snap.stx config.maxDepth).run { remaining := config.maxNodes }
   let infoNodeCount := infoTree.foldInfo (init := 0) fun _ctx _info n => n + 1
   let subtrees := rootSubtreeCount infoTree
   let tags := (infoTagSummary infoTree).toArray
   let path := pathToCursor text pos infoTree
   let focusedNodes := (focusedPathsWithInfo text pos infoTree).take 6
   let customAtPosCount := customInfoNodesAtPosCount infoTree pos
-  let summary := captureSummaryText text uri? position snap pos
-  let tree := infoTreeToExplorerTree text 30 none infoTree
-  let stxTree := stxToExplorerTree text 40 snap.stx
-  { summary
+  let truncated := infoTruncated || syntaxBudget.truncated
+  let summary := if truncated then "Partial capture: node or depth limit reached. Increase the limits for more context." else ""
+  let tree := infoTreeToExplorerTree text config.maxChildren none infoTree config.maxDepth
+  let stxTree := stxToExplorerTree text config.maxChildren stx config.maxDepth
+  { summary, truncated
   , tree := some tree
   , stxTree := some stxTree
   , facts := snapshotFacts position snap subtrees infoNodeCount tags.size customAtPosCount
@@ -536,7 +476,11 @@ meta def captureSummary
 
 private def infoTreeAtPosImpl (params : InfoTreeAtPosParams) : RequestM (RequestTask ExplorerCapture) := do
   DevWidgets.Lib.withSnapshotAtPos params.pos fun atPos => do
-    return captureSummary atPos.text params.uri? params.pos atPos.snap atPos.utf8Pos
+    return captureSummary atPos.text params.pos atPos.snap atPos.utf8Pos {
+      maxChildren := params.maxChildren?.getD 30
+      maxDepth := params.maxDepth?.getD 32
+      maxNodes := params.maxNodes?.getD 4096
+    }
 
 @[implemented_by infoTreeAtPosImpl]
 meta opaque infoTreeAtPos (params : InfoTreeAtPosParams) : RequestM (RequestTask ExplorerCapture)
@@ -545,7 +489,7 @@ attribute [server_rpc_method] infoTreeAtPos
 
 @[widget_module]
 def infoTreeExplorerWidget : Lean.Widget.Module where
-  javascript := "
+  javascript := DevWidgets.Lib.Panel.javascript ++ "
     import { useAsyncPersistent, useRpcSession, mapRpcError } from '@leanprover/infoview'
     import * as React from 'react';
 
@@ -559,7 +503,7 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
         borderRadius: '4px',
         border: '1px solid var(--vscode-editorWidget-border)',
         fontFamily: 'var(--vscode-editor-font-family, monospace)',
-        fontSize: '11px'
+        fontSize: '12px'
       };
       if (node.nodeType === 'commandCtx') {
         if (node.commandCtxChanged) {
@@ -567,45 +511,45 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
             return Object.assign({}, base, {
               background: 'rgba(220, 90, 90, 0.22)',
               border: '1px solid rgba(220, 90, 90, 0.6)',
-              color: 'var(--vscode-editorError-foreground)'
+              color: 'var(--vscode-editor-foreground)'
             });
           }
           return Object.assign({}, base, {
             background: 'rgba(215, 140, 60, 0.22)',
             border: '1px solid rgba(215, 140, 60, 0.5)',
-            color: 'var(--vscode-editorWarning-foreground)'
+            color: 'var(--vscode-editor-foreground)'
           });
         }
         return Object.assign({}, base, {
           background: 'rgba(110, 180, 130, 0.18)',
-          color: 'var(--vscode-testing-iconPassed)'
+          color: 'var(--vscode-editor-foreground)'
         });
       }
       if (label.startsWith('context[')) {
-        return Object.assign({}, base, { background: 'rgba(120, 140, 170, 0.18)', color: 'var(--vscode-symbolIcon-classForeground)' });
+        return Object.assign({}, base, { background: 'rgba(120, 140, 170, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('tactic ')) {
-        return Object.assign({}, base, { background: 'rgba(80, 180, 120, 0.18)', color: 'var(--vscode-symbolIcon-methodForeground)' });
+        return Object.assign({}, base, { background: 'rgba(80, 180, 120, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('term ')) {
-        return Object.assign({}, base, { background: 'rgba(90, 150, 210, 0.18)', color: 'var(--vscode-symbolIcon-variableForeground)' });
+        return Object.assign({}, base, { background: 'rgba(90, 150, 210, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('command ')) {
-        return Object.assign({}, base, { background: 'rgba(210, 150, 70, 0.18)', color: 'var(--vscode-symbolIcon-keywordForeground)' });
+        return Object.assign({}, base, { background: 'rgba(210, 150, 70, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('custom ')) {
-        return Object.assign({}, base, { background: 'rgba(190, 120, 210, 0.18)', color: 'var(--vscode-symbolIcon-operatorForeground)' });
+        return Object.assign({}, base, { background: 'rgba(190, 120, 210, 0.18)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.node ')) {
-        return Object.assign({}, base, { background: 'rgba(100, 170, 220, 0.16)', color: 'var(--vscode-symbolIcon-moduleForeground)' });
+        return Object.assign({}, base, { background: 'rgba(100, 170, 220, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.ident ')) {
-        return Object.assign({}, base, { background: 'rgba(120, 200, 130, 0.16)', color: 'var(--vscode-symbolIcon-variableForeground)' });
+        return Object.assign({}, base, { background: 'rgba(120, 200, 130, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
       if (label.startsWith('syntax.atom ')) {
-        return Object.assign({}, base, { background: 'rgba(220, 170, 90, 0.16)', color: 'var(--vscode-symbolIcon-stringForeground)' });
+        return Object.assign({}, base, { background: 'rgba(220, 170, 90, 0.16)', color: 'var(--vscode-editor-foreground)' });
       }
-      return Object.assign({}, base, { background: 'rgba(128, 128, 128, 0.12)', color: 'var(--vscode-foreground)' });
+      return Object.assign({}, base, { background: 'rgba(128, 128, 128, 0.12)', color: 'var(--vscode-editor-foreground)' });
     }
 
     function collectOpenPathKeys(root, labels) {
@@ -636,8 +580,8 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
       const counts = new Map();
       if (!root || !Array.isArray(focusedEntries)) return counts;
       for (const entry of focusedEntries) {
-        if (!entry || typeof entry.path !== 'string' || entry.path === '') continue;
-        const labels = entry.path.split(' > ').map(s => s.trim()).filter(Boolean);
+        if (!entry || !Array.isArray(entry.path) || entry.path.length === 0) continue;
+        const labels = entry.path;
         if (labels.length === 0) continue;
         const keys = collectOpenPathKeys(root, labels);
         for (const k of keys) {
@@ -721,25 +665,18 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
       return lines;
     }
 
-    function parseFocusedItem(item) {
-      if (typeof item !== 'string') return null;
-      const lines = item.split('\\n').map(s => s.trim()).filter(Boolean);
-      if (lines.length === 0) return null;
-      const title = lines[0];
-      let path = '';
-      let output = '';
-      for (const line of lines.slice(1)) {
-        if (line.startsWith('path: ')) path = line.slice(6);
-        if (line.startsWith('output: ')) output = line.slice(8);
-      }
-      return { title, path, output };
-    }
-
     export default function (props) {
       const rs = useRpcSession();
+      const control = useCursorControls(props?.pos);
+      const [limits, setLimits, resetLimits] = usePanelSettings({
+        maxChildren: boundedNat(props?.maxChildren, 30, 1, 100),
+        maxDepth: boundedNat(props?.maxDepth, 32, 1, 64),
+        maxNodes: boundedNat(props?.maxNodes, 4096, 1, 16384)
+      });
       const [forceOpen, setForceOpen] = React.useState(null);
 
-      const capture = useAsyncPersistent(async () => {
+      const liveCapture = useAsyncPersistent(async () => {
+        if (control.pinned) return undefined;
         if (!props?.pos) {
           return {
             summary: 'No cursor position available yet.',
@@ -747,9 +684,11 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
             stxTree: null
           };
         }
-        const params = { pos: props.pos, 'uri?': props?.pos?.uri ?? null };
-        return await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params);
-      }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character]);
+        const params = { pos: props.pos, ...limits };
+        const value = await rs.call('DevWidgets.InfoTreeExplorer.infoTreeAtPos', params);
+        return { ...value, sourcePos: { ...props.pos } };
+      }, [rs, props?.pos?.uri, props?.pos?.line, props?.pos?.character, control.pinned, control.revision, limits.maxChildren, limits.maxDepth, limits.maxNodes]);
+      const capture = control.view(liveCapture);
 
       const payload =
         capture.state === 'resolved' && capture.value
@@ -760,15 +699,12 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
       const facts = Array.isArray(payload.facts) ? payload.facts : [];
       const cursorPath = Array.isArray(payload.cursorPath) ? payload.cursorPath : [];
       const focused = Array.isArray(payload.focused) ? payload.focused : [];
-      const parsedFocused = React.useMemo(
-        () => focused.map(parseFocusedItem).filter(x => x !== null),
-        [focused]
-      );
+      const parsedFocused = focused;
       const focusedHitsByLabel = React.useMemo(() => {
         const m = new Map();
         for (const f of parsedFocused) {
           if (!f || !f.path) continue;
-          for (const seg of f.path.split(' > ')) {
+          for (const seg of f.path) {
             const key = seg.trim();
             if (key === '') continue;
             m.set(key, (m.get(key) || 0) + 1);
@@ -789,8 +725,10 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
         paddingBottom: '0.45rem',
         listStyle: 'none'
       };
-      const cursorLabel = props?.pos
-        ? 'L' + (props.pos.line + 1) + ':' + (props.pos.character + 1)
+      // Persistent results retain their own position while the next request is loading.
+      const resultPos = payload.sourcePos || control.pos;
+      const cursorLabel = resultPos
+        ? 'L' + (resultPos.line + 1) + ':' + (resultPos.character + 1)
         : 'cursor unknown';
       const factMap = Object.fromEntries(facts.map(pair => [pair[0], pair[1]]));
       const headerChips = [
@@ -821,43 +759,117 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
 
       return e('details', { open: true, style: { marginTop: '0.5rem' } },
         e('summary', null, 'InfoTree Explorer'),
-        e('div', {
-          style: {
-            marginTop: '0.42rem',
-            marginBottom: '0.35rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.3rem',
-            whiteSpace: 'nowrap',
-            overflowX: 'auto',
-            paddingBottom: '0.08rem'
-          }
-        },
-          e('span', {
-            style: {
-              fontWeight: '700',
-              letterSpacing: '0.02em',
-              marginRight: '0.15rem'
-            }
-          }, 'Explorer'),
-          ...headerChips.map((pair, i) =>
-            e('span', {
-              key: i,
-              style: {
-                border: '1px solid var(--vscode-editorWidget-border)',
-                borderRadius: '999px',
-                padding: '0.08rem 0.42rem',
-                background: pair[0] === 'errors' && String(pair[1]) === 'true'
-                  ? 'rgba(220, 90, 90, 0.2)'
-                  : 'var(--vscode-editor-background)',
-                fontSize: '0.74rem',
-                lineHeight: '1.2'
-              }
-            }, pair[0] + ': ' + pair[1])
+        cursorToolbar(control, capture, () => { resetLimits(); setForceOpen(null); }, resultPos),
+        (payload.truncated || !control.pos || capture.state !== 'resolved' || (!payload.tree && !payload.stxTree))
+          ? e('div', {
+              role: capture.state === 'rejected' ? 'alert' : 'status',
+              style: { whiteSpace: 'pre-wrap', color: capture.state === 'rejected'
+                ? 'var(--vscode-errorForeground)' : 'var(--vscode-descriptionForeground)' }
+            }, control.pos ? payload.summary : 'Move the cursor into a declaration to inspect elaboration.')
+          : null,
+        e('details', {},
+          e('summary', {}, 'Tree settings'),
+          e('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' } },
+            panelButton('Focused', () => setLimits({ maxChildren: 10, maxDepth: 12, maxNodes: 1024 }), control.pinned),
+            panelButton('Detailed', () => setLimits({ maxChildren: 60, maxDepth: 48, maxNodes: 8192 }), control.pinned),
+            e('label', {}, 'Children per node ', e('input', {
+              type: 'number', min: 1, max: 100, value: limits.maxChildren, disabled: control.pinned,
+              onChange: (ev) => setLimits((prev) => ({ ...prev, maxChildren: boundedNat(Number(ev.target.value), 30, 1, 100) })),
+              style: { width: '4rem' }
+            })),
+            e('label', {}, 'Tree depth ', e('input', {
+              type: 'number', min: 1, max: 64, value: limits.maxDepth, disabled: control.pinned,
+              onChange: (ev) => setLimits((prev) => ({ ...prev, maxDepth: boundedNat(Number(ev.target.value), 32, 1, 64) })),
+              style: { width: '4rem' }
+            })),
+            e('label', {}, 'Nodes per tree ', e('input', {
+              type: 'number', min: 1, max: 16384, value: limits.maxNodes, disabled: control.pinned,
+              onChange: (ev) => setLimits((prev) => ({ ...prev, maxNodes: boundedNat(Number(ev.target.value), 4096, 1, 16384) })),
+              style: { width: '5rem' }
+            }))
           )
         ),
-        e('details', { open: true, style: { marginTop: '0.5rem' } },
-          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'Path to Cursor'),
+        e('details', {}, e('summary', {}, 'Snapshot details · ' + cursorLabel),
+          e('div', {
+            style: {
+              marginTop: '0.42rem',
+              marginBottom: '0.35rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              flexWrap: 'wrap',
+              overflowWrap: 'anywhere',
+              paddingBottom: '0.08rem'
+            }
+          },
+            e('span', {
+              style: {
+                fontWeight: '700',
+                letterSpacing: '0.02em',
+                marginRight: '0.15rem'
+              }
+            }, 'Explorer'),
+            ...headerChips.map((pair, i) =>
+              e('span', {
+                key: i,
+                style: {
+                  border: '1px solid var(--vscode-editorWidget-border)',
+                  borderRadius: '999px',
+                  padding: '0.08rem 0.42rem',
+                  background: pair[0] === 'errors' && String(pair[1]) === 'true'
+                    ? 'rgba(220, 90, 90, 0.2)'
+                    : 'var(--vscode-editor-background)',
+                  fontSize: '0.74rem',
+                  lineHeight: '1.2'
+                }
+              }, pair[0] + ': ' + pair[1])
+            )
+          )
+        ),
+        parsedFocused.length > 0
+          ? e('div', { style: { marginTop: '0.3rem' } },
+              e('div', {
+                style: {
+                  fontWeight: '600',
+                  marginBottom: '0.2rem',
+                  fontSize: '0.78rem',
+                  color: 'var(--vscode-descriptionForeground)'
+                }
+              }, 'At cursor'),
+              e('div', {
+                style: {
+                  display: 'grid',
+                  gap: '0.22rem'
+                }
+              },
+              ...parsedFocused.slice(0, 3).map((f, i) =>
+                e('div', {
+                  key: i,
+                  style: {
+                    border: '1px solid var(--vscode-editorWidget-border)',
+                    borderRadius: '7px',
+                    padding: '0.2rem 0.35rem',
+                    background: 'var(--vscode-editor-background)'
+                  }
+                },
+                  e('div', { style: { fontSize: '0.74rem', fontWeight: '600' } }, f.title),
+                  f.output
+                    ? e('div', {
+                        style: {
+                          marginTop: '0.12rem',
+                          fontSize: '0.72rem',
+                          color: 'var(--vscode-descriptionForeground)',
+                          whiteSpace: 'pre-wrap',
+                          overflowWrap: 'anywhere'
+                        }
+                      }, f.output)
+                    : null
+                )
+              ))
+            )
+          : null,
+        e('details', { style: { marginTop: '0.5rem' } },
+          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'Path to cursor'),
           cursorPath.length > 0
             ? e('ul', {
                 style: {
@@ -910,49 +922,6 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
               )
             )
             : e('div', { style: { marginTop: '0.4rem', color: 'var(--vscode-descriptionForeground)' } }, 'No cursor path captured.'),
-          parsedFocused.length > 0
-            ? e('div', { style: { marginTop: '0.3rem' } },
-                e('div', {
-                  style: {
-                    fontWeight: '600',
-                    marginBottom: '0.2rem',
-                    fontSize: '0.78rem',
-                    color: 'var(--vscode-descriptionForeground)'
-                  }
-                }, 'Focused preview in path context'),
-                e('div', {
-                  style: {
-                    display: 'grid',
-                    gap: '0.22rem'
-                  }
-                },
-                ...parsedFocused.slice(0, 3).map((f, i) =>
-                  e('div', {
-                    key: i,
-                    style: {
-                      border: '1px solid var(--vscode-editorWidget-border)',
-                      borderRadius: '7px',
-                      padding: '0.2rem 0.35rem',
-                      background: 'var(--vscode-editor-background)'
-                    }
-                  },
-                    e('div', { style: { fontSize: '0.74rem', fontWeight: '600' } }, f.title),
-                    f.output
-                      ? e('div', {
-                          style: {
-                            marginTop: '0.12rem',
-                            fontSize: '0.72rem',
-                            color: 'var(--vscode-descriptionForeground)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }
-                        }, f.output)
-                      : null
-                  )
-                ))
-              )
-            : null,
           focused.length > 0
             ? e('details', { open: false, style: { marginTop: '0.32rem' } },
                 e('summary', { style: { cursor: 'pointer' } }, 'Focused details (' + focused.length + ')'),
@@ -983,7 +952,7 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
                                 color: 'var(--vscode-descriptionForeground)',
                                 whiteSpace: 'pre-wrap'
                               }
-                            }, 'path: ' + f.path)
+                            }, 'path: ' + f.path.join(' > '))
                           : null,
                         f.output
                           ? e('div', {
@@ -997,36 +966,18 @@ def infoTreeExplorerWidget : Lean.Widget.Module where
                           : null
                       )
                     ),
-                    e('details', { open: false, style: { marginTop: '0.2rem' } },
-                      e('summary', { style: { cursor: 'pointer', fontSize: '0.74rem' } }, 'Raw focused entries'),
-                      e('ul', {
-                        style: {
-                          marginTop: '0.22rem',
-                          paddingLeft: '1rem',
-                          whiteSpace: 'pre-wrap',
-                          lineHeight: '1.3'
-                        }
-                      }, focused.map((item, i) => e('li', { key: i, style: { marginBottom: '0.35rem' } }, item)))
-                    )
                   )
-                  : e('ul', {
-                      style: {
-                        marginTop: '0.22rem',
-                        paddingLeft: '1rem',
-                        whiteSpace: 'pre-wrap',
-                        lineHeight: '1.3'
-                      }
-                    }, focused.map((item, i) => e('li', { key: i, style: { marginBottom: '0.35rem' } }, item)))
+                  : null
               )
             : null
         ),
+        e('details', { style: { marginTop: '0.4rem' } },
+          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'InfoTree'),
         e('div', { style: { marginTop: '0.2rem', marginBottom: '0.5rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' } },
           e('button', { onClick: () => setForceOpen(true) }, 'Expand all'),
           e('button', { onClick: () => setForceOpen(false) }, 'Collapse all'),
           e('button', { onClick: () => setForceOpen(null) }, 'Focus path')
         ),
-        e('details', { open: true, style: { marginTop: '0.4rem' } },
-          e('summary', { style: { fontWeight: '600', cursor: 'pointer' } }, 'InfoTree'),
           payload.tree
             ? e('ul', { style: boxStyle }, e(TreeNode, {
                 node: payload.tree,
