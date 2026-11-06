@@ -1,3 +1,4 @@
+import tests.SnapshotExplorer.Gate
 import DevWidgets.CE
 import DevWidgets.DocString
 import DevWidgets.InfoTreeExplorer

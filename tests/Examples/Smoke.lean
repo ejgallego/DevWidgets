@@ -1,3 +1,4 @@
+import examples.SnapshotExplorer
 import examples.CE
 import examples.PTracker
 import examples.InfoViewExplorer

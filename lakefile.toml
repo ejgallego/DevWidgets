@@ -5,11 +5,12 @@ testDriver = "Tests"
 
 [[lean_lib]]
 name = "DevWidgets"
-roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DocString", "DevWidgets.Lib"]
+roots = ["DevWidgets.CE", "DevWidgets.PTracker", "DevWidgets.InfoTreeExplorer", "DevWidgets.DocString", "DevWidgets.Lib", "DevWidgets.SnapshotExplorer"]
 
 [[lean_lib]]
 name = "Examples"
 roots = [
+  "examples.SnapshotExplorer",
   "examples.CE",
   "examples.PTracker",
   "examples.InfoViewExplorer",
@@ -22,6 +23,8 @@ roots = [
 name = "Tests"
 needs = ["widgetRuntime", "widgetServer"]
 roots = [
+  "tests.SnapshotExplorer.Gate",
+  "tests.SnapshotExplorer.Observe",
   "tests.CE.RpcAndSchema",
   "tests.CE.Compilation",
   "tests.PTracker.RpcContracts",

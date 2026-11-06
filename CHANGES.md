@@ -1,6 +1,10 @@
 unreleased
 ----------
 
+- [SnapshotExplorer] Separate worker identity from cursor-bound RPC handles, preserve selections across navigation, and permanently invalidate disposed effects. Model unknown metadata explicitly, recognize exact-limit EOF, inspect generic snapshot trees, and share traversal/configuration bounds.
+
+- [SnapshotExplorer] Add an experimental live file snapshot panel with bounded command/declaration/tactic inspection, separate readiness indicators, frozen captures, and version-aware polling. Include controlled pending-elaboration server tests and frontend lifecycle coverage.
+
 - [PTracker] Reconcile overlapping reads/deletes; make shared deletion idempotent and return Unit. Remove unused counters, distinguish failed/cancelled outcomes with an elaboration bracket, and expose explicit headless retention by age/count.
 - [CE] Derive availability from code results, embed the canonical schema, remove metadata/value wrappers and parsed debug strings, and compile once for both IR/LCNF outputs. RPC payload changes are documented in README.
 - [InfoTreeExplorer] Return structured focused previews, remove redundant summaries and unused full fingerprint mode, and bound inspection by node/depth budgets before computing facts and paths. Mark partial captures explicitly.
