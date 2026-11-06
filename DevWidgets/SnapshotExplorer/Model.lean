@@ -4,12 +4,30 @@ import Lean
 namespace DevWidgets.SnapshotExplorer
 open Lean
 
-structure Config where
+/-- Shared numeric bounds, also embedded in the frontend. -/
+structure NumericSetting where
+  value : Nat
+  min : Nat
+  max : Nat
+  deriving ToJson
+
+def intervalSetting : NumericSetting := ⟨500, 100, 60000⟩
+def commandsSetting : NumericSetting := ⟨200, 1, 2000⟩
+def nodesSetting : NumericSetting := ⟨128, 1, 2048⟩
+def depthSetting : NumericSetting := ⟨12, 0, 32⟩
+
+def NumericSetting.clamp (setting : NumericSetting) (value? : Option Nat) : Nat :=
+  Nat.max setting.min (Nat.min setting.max (value?.getD setting.value))
+
+structure Limits where
+  maxCommands : Nat := commandsSetting.value
+  maxNodes : Nat := nodesSetting.value
+  maxDepth : Nat := depthSetting.value
+  deriving ToJson, FromJson
+
+structure Config extends Limits where
   autoRefresh : Bool := true
-  intervalMs : Nat := 500
-  maxCommands : Nat := 200
-  maxNodes : Nat := 128
-  maxDepth : Nat := 12
+  intervalMs : Nat := intervalSetting.value
   deriving ToJson, FromJson
 
 def Config.manual : Config := { autoRefresh := false }
@@ -18,10 +36,17 @@ structure ReadParams where
   maxCommands? : Option Nat := none
   maxNodes? : Option Nat := none
   maxDepth? : Option Nat := none
-  /-- Selection belongs to exactly this version; stale selection is never followed. -/
+  /-- All three fields are required to follow a selection. -/
+  generation? : Option String := none
   version? : Option Nat := none
   command? : Option Nat := none
   deriving ToJson, FromJson
+
+def ReadParams.limits (p : ReadParams) : Limits := {
+  maxCommands := commandsSetting.clamp p.maxCommands?
+  maxNodes := nodesSetting.clamp p.maxNodes?
+  maxDepth := depthSetting.clamp p.maxDepth?
+}
 
 inductive Frontier where
   | pending | complete | limited | fatal
@@ -37,28 +62,50 @@ structure CommandRow where
   fatal : Bool
   deriving ToJson, FromJson
 
+inductive NodeKind where
+  | main | infoTree | elaboration | reporting | nested
+  deriving ToJson, FromJson
+
+inductive ReportingRange where
+  | inherit | skip | explicit
+  deriving ToJson, FromJson
+
+structure Facts where
+  description : String
+  fatal : Bool
+  hasInfoTree : Bool
+  /-- Local message count, not a count of distinct messages across the tree. -/
+  messages : Nat
+  deriving ToJson, FromJson
+
+/-- Task readiness does not imply a usable result or supported inspection. -/
+inductive Observation where
+  | pending
+  | inspected (facts : Facts)
+  | unsupported (typeName : String)
+  | noResult
+  deriving ToJson, FromJson
+
 /-- Preorder rows; depth determines parentage within this capture only. -/
 structure Node where
   label : String
   depth : Nat
-  ready : Bool
-  description : String := ""
+  kind : NodeKind := .nested
+  observation : Observation := .pending
   range? : Option Lsp.Range := none
-  reporting : String := "inherit"
-  fatal : Bool := false
-  hasInfoTree : Bool := false
-  /-- Local message count, not a count of distinct messages across the tree. -/
-  messages : Nat := 0
-  unsupported : Bool := false
+  reporting : ReportingRange := .inherit
   deriving ToJson, FromJson
 
 structure View where
   uri : Lsp.DocumentUri
+  /-- Opaque identity for one file worker; not a reuse fingerprint. -/
+  generation : String
   version : Nat
   commands : Array CommandRow := #[]
   frontier : Frontier := .pending
   selected? : Option Nat := none
   nodes : Array Node := #[]
+  /-- Only traversal-budget exhaustion; unsupported observations are marked per node. -/
   truncated : Bool := false
   deriving ToJson, FromJson
 

@@ -16,7 +16,7 @@ private instance : ToSnapshotTree ForeignSnapshot where
     stx := .missing, metaSnap := .finished none { diagnostics := .empty }
     result? := none
   }
-  let fatal ← observe "file:///snapshot-test.lean" 1 "".toFileMap root {}
+  let fatal ← observe "test-worker" "file:///snapshot-test.lean" 1 "".toFileMap root {}
   unless fatal.frontier == .fatal && fatal.commands.isEmpty do
     throw <| IO.userError "failed header must stop discovery"
   let processed : Language.Lean.HeaderProcessedSnapshot := {
@@ -29,7 +29,7 @@ private instance : ToSnapshotTree ForeignSnapshot where
     parserState := default
     processedSnap := { stx? := none, cancelTk? := none, task := importing.result! }
   } }
-  let waiting ← observe "file:///snapshot-test.lean" 1 "".toFileMap root {}
+  let waiting ← observe "test-worker" "file:///snapshot-test.lean" 1 "".toFileMap root {}
   unless waiting.frontier == .pending && waiting.commands.isEmpty do
     throw <| IO.userError "pending imports must not block the observer"
   importing.resolve processed
@@ -54,11 +54,14 @@ private instance : ToSnapshotTree ForeignSnapshot where
   let (nodes, limited) ← observeCommand "".toFileMap { maxNodes? := some 8 } snap
   unless nodes.size == 8 && limited do
     throw <| IO.userError "node budget did not bound a broad tree"
-  unless nodes[0]?.any (·.ready) && nodes[1]?.any (! ·.ready) do
+  unless nodes[0]?.any (fun n => n.observation matches .inspected _) &&
+      nodes[1]?.any (fun n => n.observation matches .pending) do
     throw <| IO.userError "main return must not imply complete InfoTree"
-  unless nodes[2]?.any (·.unsupported) do
+  unless nodes[2]?.any (fun n => n.observation matches .unsupported _) do
     throw <| IO.userError "unknown snapshots must stay opaque"
-  unless nodes.any (·.description == "unpositioned child") do
+  unless nodes.any (fun n => match n.observation with
+      | .inspected facts => facts.description == "unpositioned child"
+      | _ => false) do
     throw <| IO.userError "unpositioned reporting tasks were omitted"
   unless !(← cancel.isSet) do
     throw <| IO.userError "observation cancelled elaboration"
@@ -70,9 +73,32 @@ private instance : ToSnapshotTree ForeignSnapshot where
     throw <| IO.userError "zero budget must clamp to one"
   pending.resolve { diagnostics := .empty }
   let (finished, _) ← observeCommand "".toFileMap {} snap
-  unless finished[1]?.any (·.ready) do
+  unless finished[1]?.any (fun n => n.observation matches .inspected _) do
     throw <| IO.userError "resolved child did not become available"
   let encoded := toJson nodes
   let decoded ← IO.ofExcept (fromJson? encoded : Except String (Array Node))
   unless (toJson decoded).compress == encoded.compress do
     throw <| IO.userError "snapshot payload did not round trip"
+
+-- An already-generic tree needs no dynamic conversion and remains budgeted.
+#eval show IO Unit from do
+  let env ← mkEmptyEnvironment
+  let generic : SnapshotTree := {
+    element := { diagnostics := .empty, desc := "generic root" }
+    children := #[.finished none { element := { diagnostics := .empty, desc := "generic child" }, children := #[] }]
+  }
+  let command : Language.Lean.CommandElaboratingSnapshot := {
+    diagnostics := .empty
+    elabSnap := .finished none (.ofTyped generic)
+    resultSnap := .finished none { diagnostics := .empty, cmdState := Elab.Command.mkState env {} {} }
+    infoTreeSnap := .finished none { diagnostics := .empty }
+    reportSnap := .finished none { element := { diagnostics := .empty }, children := #[] }
+  }
+  let (nodes, truncated) ← observeCommand "".toFileMap {} command
+  unless !truncated && nodes.any (fun n => match n.observation with
+      | .inspected facts => facts.description == "generic child"
+      | _ => false) do
+    throw <| IO.userError "generic dynamic snapshot was not expanded"
+  let limited := ({ maxNodes? := some 999999, maxDepth? := some 999999 } : ReadParams).limits
+  unless limited.maxNodes == nodesSetting.max && limited.maxDepth == depthSetting.max do
+    throw <| IO.userError "RPC limit normalization diverged from the shared settings"

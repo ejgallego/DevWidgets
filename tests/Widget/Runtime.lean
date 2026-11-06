@@ -22,12 +22,18 @@ namespace DevWidgets.Tests.Widget.Runtime
   let input := Json.mkObj [
     ("snapshots", toJson DevWidgets.SnapshotExplorer.snapshotWidget.javascript),
     ("snapshotView", toJson ({
-      uri := "file:///workspace/Example.lean", version := 1, frontier := .pending
+      uri := "file:///workspace/Example.lean", generation := "test-worker", version := 1, frontier := .pending
       commands := #[{
         index := 0, label := "theorem example", range? := none
         mainReady := true, infoReady := false, reportingReady := false, fatal := false
       }]
     } : DevWidgets.SnapshotExplorer.View)),
+    ("snapshotUnsupported", toJson ({
+      label := "Custom elaborator", depth := 0, observation := .unsupported "CustomSnapshot"
+    } : DevWidgets.SnapshotExplorer.Node)),
+    ("snapshotInspected", toJson ({
+      label := "Known snapshot", depth := 0, observation := .inspected ⟨"Known", false, true, 3⟩
+    } : DevWidgets.SnapshotExplorer.Node)),
     ("ce", toJson DevWidgets.CE.widgetJs),
     ("infoTree", toJson DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget.javascript),
     ("progress", toJson DevWidgets.PTracker.progressWidget.javascript),

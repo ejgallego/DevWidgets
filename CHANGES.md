@@ -1,6 +1,8 @@
 unreleased
 ----------
 
+- [SnapshotExplorer] Separate worker identity from cursor-bound RPC handles, preserve selections across navigation, and permanently invalidate disposed effects. Model unknown metadata explicitly, recognize exact-limit EOF, inspect generic snapshot trees, and share traversal/configuration bounds.
+
 - [SnapshotExplorer] Add an experimental live file snapshot panel with bounded command/declaration/tactic inspection, separate readiness indicators, frozen captures, and version-aware polling. Include controlled pending-elaboration server tests and frontend lifecycle coverage.
 
 - [PTracker] Reconcile overlapping reads/deletes; make shared deletion idempotent and return Unit. Remove unused counters, distinguish failed/cancelled outcomes with an elaboration bracket, and expose explicit headless retention by age/count.

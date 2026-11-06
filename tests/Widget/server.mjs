@@ -250,14 +250,20 @@ snapshot_test_gate
   while (!(await snapshotCall('DevWidgets.Tests.SnapshotExplorer.gate', false))) { /* readiness, not a fixed sleep */ }
   const pendingView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
   assert.equal(pendingView.version, 1);
+  assert.equal(typeof pendingView.generation, 'string');
+  const anotherSnapshotSession = await connect(snapshotUri);
+  const sameWorker = await rpc(anotherSnapshotSession, snapshotUri, afterGate, 'DevWidgets.SnapshotExplorer.readSnapshots', {});
+  assert.equal(sameWorker.generation, pendingView.generation, 'RPC connections do not define worker identity');
   assert.equal(pendingView.frontier, 'pending');
   const blocked = pendingView.commands.find(row => !row.mainReady);
   assert.ok(blocked, 'gated command should be discovered but unfinished');
   const detail = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {
-    version: 1, command: blocked.index, maxNodes: 8
+    generation: pendingView.generation, version: 1, command: blocked.index, maxNodes: 8
   });
   assert.equal(detail.selected, blocked.index);
-  assert.ok(detail.nodes.some(node => node.label === 'Main elaborator' && !node.ready));
+  assert.ok(detail.nodes.some(node => node.kind === 'main' && node.observation === 'pending'));
+  const pendingBoundary = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { maxCommands: blocked.index + 1 });
+  assert.equal(pendingBoundary.frontier, 'pending', 'an unfinished continuation is not known truncation');
   assert.ok(detail.nodes.length <= 8);
   const limited = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { maxCommands: 1 });
   assert.equal(limited.commands.length, 1);
@@ -269,24 +275,42 @@ snapshot_test_gate
   await request('textDocument/hover', { textDocument: { uri: snapshotUri }, position: afterGate });
   const readyView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
   assert.equal(readyView.frontier, 'complete');
+  const boundary = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { maxCommands: readyView.commands.length });
+  assert.equal(boundary.frontier, 'complete', 'EOF must not consume the command budget');
+  assert.equal(boundary.commands.length, readyView.commands.length);
   assert.ok(readyView.commands.every(row => row.mainReady && row.infoReady));
   const declaration = readyView.commands.find(row => row.label.startsWith('theorem snapshotExample'));
   assert.ok(declaration, 'source excerpt missing');
   const nested = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {
-    version: 1, command: declaration.index
+    generation: readyView.generation, version: 1, command: declaration.index
   });
   assert.ok(nested.nodes.some(node => node.label === 'Tactics'), JSON.stringify(nested.nodes));
   assert.ok(nested.nodes.some(node => node.label === 'Tactic result'), JSON.stringify(nested.nodes));
   assert.equal(nested.truncated, false);
+  const noGeneration = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { version: 1, command: declaration.index });
+  assert.equal(noGeneration.selected, undefined, 'selection needs worker identity');
   // The same session observes a new document version; old node selection is not reused.
   notify('textDocument/didChange', {
     textDocument: { uri: snapshotUri, version: 2 }, contentChanges: [{ text: gateSource + '\n-- edited\n' }]
   });
   await request('textDocument/hover', { textDocument: { uri: snapshotUri }, position: afterGate });
-  const editedView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { version: 1, command: blocked.index });
+  const editedView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { generation: pendingView.generation, version: 1, command: blocked.index });
   assert.equal(editedView.version, 2);
   assert.equal(editedView.selected, undefined);
   assert.deepEqual(editedView.nodes, []);
+  notify('textDocument/didClose', { textDocument: { uri: snapshotUri } });
+  // Reopening creates a worker with the same URI/version but a different generation.
+  open(snapshotUri, gateSource.replace('snapshot_test_gate', '-- no gate'));
+  const restartedSession = await connect(snapshotUri);
+  await request('textDocument/hover', { textDocument: { uri: snapshotUri }, position: afterGate });
+  const restarted = await rpc(restartedSession, snapshotUri, afterGate,
+    'DevWidgets.SnapshotExplorer.readSnapshots', {
+      generation: readyView.generation, version: 1, command: declaration.index
+    });
+  assert.equal(restarted.version, 1);
+  assert.notEqual(restarted.generation, readyView.generation);
+  assert.equal(restarted.selected, undefined, 'old selection leaked into a new worker');
+  assert.deepEqual(restarted.nodes, []);
   notify('textDocument/didClose', { textDocument: { uri: snapshotUri } });
   // Editing away a still-blocked command cancels it; observation must follow the new tree.
   const editingUri = pathToFileURL(resolve('tests/Widget/EditingSnapshotFixture.lean')).href;

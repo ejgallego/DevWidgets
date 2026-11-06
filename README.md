@@ -192,6 +192,9 @@ Example files: `examples/InfoViewExplorer.lean`, `examples/InfoTreeFocused.lean`
 ## `DevWidgets.SnapshotExplorer`
 
 Experimental live observation of Lean's file elaboration snapshots, targeting Lean 4.36-rc2.
+Use it to locate unfinished elaboration and inspect the available result structure without
+adding progress instrumentation. It does not identify CPU consumers or explain causal
+bottlenecks. Lean's `trace.Elab.snapshotTree` complements it, but waits for child results.
 
 ```lean
 import DevWidgets.SnapshotExplorer
@@ -209,7 +212,9 @@ is done. Counts cover the captured portion; there is no inferred completion perc
 Select a command to inspect declaration, tactic, and reporting snapshots. Details include
 source locations, local message counts, fatal status, and InfoTree availability. The counts
 are local to each node, not a deduplicated diagnostic total. Unknown dynamic snapshot types
-are labeled unsupported instead of invoking their potentially expensive tree conversion.
+are labeled **not inspected**, with unknown metadata, instead of invoking their potentially
+expensive tree conversion. Tasks that return no snapshot are distinct from pending tasks.
+An already-generic `SnapshotTree` is inspected directly.
 The panel observes available results; it does not reconstruct a dependency graph, measure
 execution timings, or infer reuse from pointer identities.
 
@@ -230,21 +235,36 @@ Polling defaults to 500 ms (clamped to 100–60,000). The command prefix default
 (maximum 2,000); selected-command capture defaults to 128 nodes (1–2,048) and depth 12
 (0–32). Limits apply before expanding tasks; truncated captures are labeled. These limits
 bound widget traversal, not Lean's elaboration or the size of its original syntax data.
-The panel serializes requests, rejects stale responses after observed edits/session changes,
-and disposes polling and notification subscriptions on unmount.
+The panel serializes requests, preserves selection across cursor movement, rejects stale
+responses after observed edits/transport changes, and disposes polling and notification
+subscriptions on unmount. Each effect lifetime permanently invalidates its outstanding
+callbacks when disposed, including during effect replay. Closing/reopening a document
+starts a new observation lifetime, even if its version numbering restarts.
 
 The panel-free `DevWidgets.SnapshotExplorer.API` import registers
 `DevWidgets.SnapshotExplorer.readSnapshots`. Its optional limits use the configuration
-field names; optional `version` and `command` select a command index in that exact document
-version. Responses contain the file URI/version, command rows, discovery frontier, and
-selected-node capture. A stale selection returns the current overview without detail nodes.
-Node positions and command indices have no identity across document versions or worker
-restarts. This experimental contract may change with Lean's snapshot API.
+field names. To inspect a command, send `generation`, `version`, and `command` from the
+current overview. The opaque generation identifies the file worker; it is distinct from
+an RPC connection or cursor position. Responses contain that generation, the file URI/version,
+command rows, discovery frontier, and selected-node capture. A stale or incomplete selection
+returns the current overview without detail nodes. Command indices have no identity across
+document versions or worker restarts.
 
-The observer is separate from the older, unmerged `DevWidgets.Incremental` reuse prototype
-(`0c75c8b`). It does not carry forward that prototype's pointer-fingerprint cache or reuse
-classification. `Observe.lean` contains the version-specific Lean adapter; `Model.lean`
-contains the plain RPC data, and `Widget.lean` owns the observation UI and request lifetime.
+Node observations distinguish `pending`, `inspected` (with facts), `unsupported` (with a type
+name), and `noResult`. Only inspected nodes carry diagnostic counts or InfoTree availability.
+Node kinds drive presentation independently of labels. `truncated` means the selected-node
+budget was exhausted; unsupported nodes are labeled individually. Discovery distinguishes a
+ready EOF, a pending continuation, and an actually omitted command, including at the exact
+command limit. A capture is a bounded observation within one document version, not an atomic
+execution trace: tasks can finish while it is being collected. This experimental contract
+may change with Lean's snapshot API.
+
+The observer is separate from the older local `DevWidgets.Incremental` reuse prototype
+(local commit `0c75c8b`, not published in the GitHub repository). It does not carry forward
+that prototype's pointer-fingerprint cache or reuse classification. The public design and compatibility record is [PR #10](https://github.com/ejgallego/DevWidgets/pull/10).
+`Observe.lean` contains the version-specific Lean adapter; `Model.lean`
+contains the plain RPC data and shared limits. `Frontend.lean` owns the disposable observation
+hook and pure presentation conversion; `Widget.lean` renders the controls and capture.
 
 ## `DevWidgets.DocString`
 

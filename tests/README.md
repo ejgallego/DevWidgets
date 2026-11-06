@@ -19,7 +19,7 @@ lake check-test
 
 ## Current suites
 
-- `tests/SnapshotExplorer/Observe.lean`: pending versus available snapshots, bounded breadth/depth, unknown types, unpositioned reporting, cancellation-token preservation, and JSON defaults/round trips.
+- `tests/SnapshotExplorer/Observe.lean`: pending versus available snapshots, bounded breadth/depth, unknown and generic types, unpositioned reporting, cancellation-token preservation, and JSON defaults/round trips.
 - `tests/SnapshotExplorer/Gate.lean`: imported test-only gate and controller used by the server suite; no gate is part of the production widget.
 
 - `tests/CE/RpcAndSchema.lean`: canonical CE option-schema coverage.
@@ -35,7 +35,7 @@ lake check-test
   `tests/Widget/runtime.mjs`, checking CE defaults, InfoTreeExplorer position/budget decoding, and PTracker
   session changes, both same-session read/delete orderings, shared deletion, and cleanup. It also checks pin/follow across files,
   refresh invalidation, presets, typed props, configuration changes, reset behavior, multiline
-  focused previews, accurate availability, and the Markdown-to-host-renderer boundary. SnapshotExplorer checks serialized polling, queued selection, freeze/resume, edit-version rejection, session replacement, manual mode, and subscription cleanup.
+  focused previews, accurate availability, and the Markdown-to-host-renderer boundary. SnapshotExplorer checks serialized polling, queued selection, freeze/resume, edit-version rejection, cursor movement, worker replacement, effect replay, document reopening, unknown metadata, pure tree conversion, manual mode, and subscription cleanup.
   The hook driver controls effects and
   timers; it does not test browser layout or replace a VSCode InfoView smoke test.
 - `tests/Widget/Activation.lean`: panel-free API imports, RPC registration, typed configuration, and local hiding.
@@ -45,7 +45,7 @@ lake check-test
   `tests/Widget/server.mjs` and checks panel activation, section scoping, serialized
   configuration, JavaScript retrieval, the original six widget RPC endpoints, repeated CE
   recompilation, edits, and progress registry sharing/isolation across sessions/files.
-  The snapshot tests hold a command behind a controlled gate and verify observation and anchor panel discovery before release, nested tactic inspection, and edits that cancel blocked elaboration.
+  The snapshot tests hold a command behind a controlled gate and verify observation and anchor panel discovery before release, nested tactic inspection, exact EOF/pending budget boundaries, worker identity across RPC connections/reopens, and edits that cancel blocked elaboration.
   Fixtures are opened as in-memory documents; the test does not modify source files.
   Requests and the whole run have timeouts; malformed transport data rejects pending
   requests, and the server is shut down after success or failure.
@@ -95,14 +95,15 @@ screenshots for theme contrast and visual hierarchy; automated checks do not rep
 ### Snapshot Explorer
 
 Open `examples/SnapshotExplorer.lean` in a separate isolated VSCode window, with
-InfoView on its final `#check`, then run:
+InfoView on its final `#check`. Leave the host InfoView unpinned and dismiss
+VSCode onboarding/dialogs, then run:
 
 ```bash
 node tests/SnapshotExplorer/browser.mjs 9232 900 /tmp/snapshot-ui.png
 ```
 
 Use the matching `--remote-debugging-port=9232` when opening that window. This suite
-checks nested disclosures, selection, disclosure persistence through refresh,
-keyboard focus across freeze/resume, and horizontal overflow. Repeat at a wider
+checks source navigation with selection retained across cursor movement, nested disclosures,
+disclosure persistence through refresh, keyboard focus across freeze/resume, and horizontal overflow. Repeat at a wider
 window width and in a light theme. Both browser suites share `tests/Widget/cdp.mjs`.
 The screenshot remains a manual visual review, separate from these DOM assertions.

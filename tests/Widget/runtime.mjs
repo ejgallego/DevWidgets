@@ -49,7 +49,7 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
         const previous = slots[i];
         effects.push(() => {
           previous?.cleanup?.();
-          slots[i] = { deps, cleanup: fn() };
+          slots[i] = { deps, cleanup: fn(), setup: fn };
         });
       }
     }
@@ -103,6 +103,12 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
     render,
     notify(method, params) { notifications.get(method)?.(params); render(); },
     get timerCount() { return timers.size; },
+    replayEffects() {
+      slots.forEach(slot => slot?.setup && slot.cleanup?.());
+      slots.forEach(slot => { if (slot?.setup) slot.cleanup = slot.setup(); });
+      render();
+    },
+    forest(rows) { return context.snapshotForest(rows); },
     replaceProps(next) { props = next; render(); },
     replaceValue(index, value) { asyncValues[index] = value; render(); },
     replaceRpc(next) { rpc = next; render(); },
@@ -521,7 +527,7 @@ async function testSnapshotLifecycle() {
   // An edit invalidates an in-flight detail response and queues the new document.
   widget.notify('textDocument/didChange', { textDocument: { uri: pos.uri, version: 4 } });
   requests[4].resolve({ ...fixtures.snapshotView, version: 3, selected: 0,
-    nodes: [{ label: 'stale detail', ready: true, depth: 0 }] });
+    nodes: [{ label: 'stale detail', observation: 'pending', depth: 0 }] });
   await settle(widget);
   assert.ok(!text(widget).includes('stale detail'));
   assert.equal(requests[5].params.version, undefined);
@@ -530,24 +536,34 @@ async function testSnapshotLifecycle() {
   await new Promise(setImmediate);
 }
 
-async function testSnapshotManualAndSession() {
-  const old = deferred(), fresh = deferred();
-  const widget = mount(fixtures.snapshots, { call: () => old.promise }, [], { pos, autoRefresh: false });
-  assert.equal(widget.timerCount, 0);
-  widget.replaceRpc({ call: () => fresh.promise });
-  fresh.resolve({ ...fixtures.snapshotView, version: 7 });
-  await settle(widget);
-  old.resolve(fixtures.snapshotView);
-  await settle(widget);
-  assert.ok(text(widget).includes('version 7'));
-  assert.ok(!text(widget).includes('version 1'));
-  button(widget, 'theorem example · no source range').props.onClick(); widget.render();
-  let restartedParams;
-  widget.replaceRpc({ call: async (_method, params) => {
-    restartedParams = params; return { ...fixtures.snapshotView, version: 7 };
+async function testSnapshotCursorAndWorker() {
+  const requests = [];
+  const atPosition = position => ({ call: async (_method, params) => {
+    requests.push({ position, ...params });
+    return { ...fixtures.snapshotView, selected: params.command };
   }});
+  const widget = mount(fixtures.snapshots, atPosition('anchor'), [], { pos, autoRefresh: false });
   await settle(widget);
-  assert.equal(restartedParams.version, undefined, 'selection leaked across sessions with the same document version');
+  assert.equal(widget.timerCount, 0);
+  button(widget, 'theorem example · no source range').props.onClick(); widget.render();
+  await settle(widget);
+  assert.ok(text(widget).includes('Snapshots for command 1'));
+  widget.replaceRpc(atPosition('same file, other position'));
+  await settle(widget);
+  assert.equal(requests.at(-1).generation, fixtures.snapshotView.generation);
+  assert.equal(requests.at(-1).command, 0, 'cursor movement lost selection');
+  assert.ok(text(widget).includes('Snapshots for command 1'));
+
+  // The server omits detail on generation mismatch, even when version/index coincide.
+  const restartedRequests = [];
+  widget.replaceRpc({ call: async (_method, params) => {
+    restartedRequests.push(params);
+    return { ...fixtures.snapshotView, generation: 'new-worker' };
+  }});
+  await settle(widget); await settle(widget);
+  assert.equal(restartedRequests[0].generation, 'test-worker');
+  assert.equal(restartedRequests.at(-1).command, undefined, 'worker restart did not clear selection');
+  assert.ok(!text(widget).includes('Snapshots for command 1'));
   button(widget, 'Freeze capture').props.onClick(); widget.render();
   widget.replaceProps({ pos: { ...pos, uri: 'file:///other.lean' }, autoRefresh: false });
   assert.ok(text(widget).includes('Example.lean'), 'frozen capture lost source file');
@@ -557,10 +573,61 @@ async function testSnapshotManualAndSession() {
   await new Promise(setImmediate);
 }
 
+async function testSnapshotDisposal() {
+  const replies = [];
+  const widget = mount(fixtures.snapshots, { call: () => {
+    const reply = deferred(); replies.push(reply); return reply.promise;
+  }});
+  widget.replayEffects();
+  assert.equal(replies.length, 2);
+  replies[1].resolve({ ...fixtures.snapshotView, version: 2 });
+  await settle(widget);
+  replies[0].resolve({ ...fixtures.snapshotView, version: 1 });
+  await settle(widget);
+  assert.ok(text(widget).includes('version 2'), 'disposed effect overwrote its replacement');
+  assert.ok(!text(widget).includes('version 1'));
+  widget.tick();
+  widget.notify('textDocument/didClose', { textDocument: { uri: pos.uri } });
+  widget.notify('textDocument/didOpen', { textDocument: { uri: pos.uri, version: 1 } });
+  const last = replies.at(-1);
+  last.resolve({ ...fixtures.snapshotView, generation: 'reopened-worker' });
+  await settle(widget);
+  for (const reply of replies.slice(2, -1)) reply.reject(new Error('obsolete worker'));
+  await settle(widget);
+  assert.ok(!text(widget).includes('obsolete worker'));
+  assert.ok(text(widget).includes('version 1'), 'reopened documents may restart version numbering');
+  widget.unmount();
+}
+
+async function testSnapshotMetadataAndForest() {
+  const widget = mount(fixtures.snapshots, { call: async () => ({
+    ...fixtures.snapshotView, selected: 0,
+    nodes: [fixtures.snapshotUnsupported, fixtures.snapshotInspected]
+  }) });
+  await settle(widget);
+  assert.ok(text(widget).includes('not inspected'));
+  assert.ok(text(widget).includes('their contents are unknown'));
+  assert.ok(!text(widget).includes('0 local messages'));
+  assert.ok(!text(widget).includes('InfoTree absent'));
+  assert.ok(text(widget).includes('3 local messages · InfoTree available'));
+  const rows = [
+    { label: 'a', depth: 0 }, { label: 'b', depth: 1 }, { label: 'c', depth: 1 }, { label: 'd', depth: 0 }
+  ];
+  const before = widget.forest(rows);
+  const after = widget.forest([...rows.slice(0, 2), { label: 'new descendant', depth: 2 }, ...rows.slice(2)]);
+  assert.equal(before[0].children[1].path, after[0].children[1].path, 'new descendants changed sibling identity');
+  assert.equal(before[1].path, after[1].path);
+  assert.equal(after[0].children[0].children[0].node.label, 'new descendant');
+  assert.equal(rows[0].children, undefined, 'presentation conversion mutated its input');
+  widget.unmount();
+}
+
 const failures = [];
 for (const [name, run] of [
   ['Snapshot observation lifecycle', testSnapshotLifecycle],
-  ['Snapshot manual/session behavior', testSnapshotManualAndSession],
+  ['Snapshot cursor/worker identity', testSnapshotCursorAndWorker],
+  ['Snapshot effect disposal', testSnapshotDisposal],
+  ['Snapshot unknown metadata and forest', testSnapshotMetadataAndForest],
   ['CE backend defaults', testCEDefaults],
   ['InfoTreeExplorer request', testInfoTreeRequest],
   ['PTracker read/delete order', testReadDeleteInterleavings],
