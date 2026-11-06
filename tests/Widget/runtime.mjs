@@ -11,12 +11,14 @@ const pos = { uri: 'file:///workspace/Example.lean', line: 2, character: 4 };
 function mount(source, rpc, asyncValues = [], props = { pos }) {
   const slots = [];
   const timers = new Map();
+  const notifications = new Map();
   let cursor = 0, asyncCursor = 0, nextTimer = 0;
   let effects = [], dirty = false, mounted = true, tree;
   const sameDeps = (a, b) => a && b && a.length === b.length &&
     a.every((value, i) => Object.is(value, b[i]));
   const React = {
     Fragment: 'fragment',
+    useContext: () => ({ revealLocation: async () => {} }),
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
     useState(initial) {
       const i = cursor++;
@@ -56,6 +58,11 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
   const asyncDeps = [];
   const context = vm.createContext({
     React,
+    EditorContext: {},
+    useClientNotificationEffect: (method, callback, deps) => React.useEffect(() => {
+      notifications.set(method, callback);
+      return () => notifications.delete(method);
+    }, deps),
     Markdown: "InfoViewMarkdown",
     useRpcSession: () => rpc,
     useAsync: (fn, deps) => {
@@ -94,6 +101,8 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
     asyncCalls,
     asyncDeps,
     render,
+    notify(method, params) { notifications.get(method)?.(params); render(); },
+    get timerCount() { return timers.size; },
     replaceProps(next) { props = next; render(); },
     replaceValue(index, value) { asyncValues[index] = value; render(); },
     replaceRpc(next) { rpc = next; render(); },
@@ -102,6 +111,7 @@ function mount(source, rpc, asyncValues = [], props = { pos }) {
       slots.forEach((slot) => slot?.cleanup?.());
       mounted = false;
       assert.equal(timers.size, 0, 'timers remain after unmount');
+      assert.equal(notifications.size, 0, 'notification handlers remain after unmount');
     }
   };
 }
@@ -474,8 +484,83 @@ async function testQualifiedCalls() {
   }
 }
 
+async function testSnapshotLifecycle() {
+  const requests = [];
+  const rpc = { call: (method, params) => {
+    assert.equal(method, 'DevWidgets.SnapshotExplorer.readSnapshots');
+    const reply = deferred(); requests.push({ params, ...reply }); return reply.promise;
+  }};
+  const widget = mount(fixtures.snapshots, rpc);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].params.maxNodes, 128);
+  widget.tick(); widget.tick();
+  assert.equal(requests.length, 1, 'polls must not overlap');
+  requests[0].resolve(fixtures.snapshotView);
+  await settle(widget);
+  assert.equal(requests.length, 2, 'queued refresh runs after previous response');
+  assert.ok(text(widget).includes('theorem example'));
+  button(widget, 'Freeze capture').props.onClick(); widget.render();
+  assert.equal(widget.timerCount, 0, 'freeze stops polling');
+  requests[1].resolve({ ...fixtures.snapshotView, version: 2, commands: [] });
+  await settle(widget);
+  assert.ok(text(widget).includes('theorem example'), 'late response changed frozen capture');
+  widget.notify('textDocument/didChange', { textDocument: { uri: pos.uri, version: 3 } });
+  assert.ok(text(widget).includes('version 1'), 'edits must preserve frozen provenance');
+  button(widget, 'Resume live').props.onClick(); widget.render();
+  assert.equal(requests.length, 3);
+  requests[2].resolve({ ...fixtures.snapshotView, version: 2 });
+  await settle(widget);
+  assert.ok(!text(widget).includes('theorem example'), 'response older than observed edit was accepted');
+  widget.tick();
+  requests[3].resolve({ ...fixtures.snapshotView, version: 3 });
+  await settle(widget);
+  assert.ok(text(widget).includes('version 3'));
+  button(widget, 'theorem example · no source range').props.onClick(); widget.render();
+  assert.equal(requests[4].params.version, 3);
+  assert.equal(requests[4].params.command, 0);
+  // An edit invalidates an in-flight detail response and queues the new document.
+  widget.notify('textDocument/didChange', { textDocument: { uri: pos.uri, version: 4 } });
+  requests[4].resolve({ ...fixtures.snapshotView, version: 3, selected: 0,
+    nodes: [{ label: 'stale detail', ready: true, depth: 0 }] });
+  await settle(widget);
+  assert.ok(!text(widget).includes('stale detail'));
+  assert.equal(requests[5].params.version, undefined);
+  widget.unmount();
+  requests[5].resolve({ ...fixtures.snapshotView, version: 4 });
+  await new Promise(setImmediate);
+}
+
+async function testSnapshotManualAndSession() {
+  const old = deferred(), fresh = deferred();
+  const widget = mount(fixtures.snapshots, { call: () => old.promise }, [], { pos, autoRefresh: false });
+  assert.equal(widget.timerCount, 0);
+  widget.replaceRpc({ call: () => fresh.promise });
+  fresh.resolve({ ...fixtures.snapshotView, version: 7 });
+  await settle(widget);
+  old.resolve(fixtures.snapshotView);
+  await settle(widget);
+  assert.ok(text(widget).includes('version 7'));
+  assert.ok(!text(widget).includes('version 1'));
+  button(widget, 'theorem example · no source range').props.onClick(); widget.render();
+  let restartedParams;
+  widget.replaceRpc({ call: async (_method, params) => {
+    restartedParams = params; return { ...fixtures.snapshotView, version: 7 };
+  }});
+  await settle(widget);
+  assert.equal(restartedParams.version, undefined, 'selection leaked across sessions with the same document version');
+  button(widget, 'Freeze capture').props.onClick(); widget.render();
+  widget.replaceProps({ pos: { ...pos, uri: 'file:///other.lean' }, autoRefresh: false });
+  assert.ok(text(widget).includes('Example.lean'), 'frozen capture lost source file');
+  button(widget, 'Reset panel').props.onClick(); widget.render();
+  assert.ok(!text(widget).includes('Frozen capture'));
+  widget.unmount();
+  await new Promise(setImmediate);
+}
+
 const failures = [];
 for (const [name, run] of [
+  ['Snapshot observation lifecycle', testSnapshotLifecycle],
+  ['Snapshot manual/session behavior', testSnapshotManualAndSession],
   ['CE backend defaults', testCEDefaults],
   ['InfoTreeExplorer request', testInfoTreeRequest],
   ['PTracker read/delete order', testReadDeleteInterleavings],

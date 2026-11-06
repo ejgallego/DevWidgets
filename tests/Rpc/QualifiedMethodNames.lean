@@ -1,3 +1,4 @@
+import DevWidgets.SnapshotExplorer
 import DevWidgets.DocString
 import DevWidgets.CE
 import DevWidgets.InfoTreeExplorer
@@ -15,7 +16,7 @@ private unsafe def evalWrapper (env : Environment) (opts : Options) (name : Name
 
 #eval show CoreM Unit from do
   let env ← getEnv
-  for method in [`DevWidgets.CE.ceOptionSchema, `DevWidgets.CE.irAtPos,
+  for method in [`DevWidgets.SnapshotExplorer.readSnapshots, `DevWidgets.CE.ceOptionSchema, `DevWidgets.CE.irAtPos,
       `DevWidgets.DocString.docAtPos, `DevWidgets.InfoTreeExplorer.infoTreeAtPos,
       `DevWidgets.PTracker.readProgressViewRpc, `DevWidgets.PTracker.deleteProgressRefRpc] do
     let some wrapper := Server.userRpcProcedures.find? env method

@@ -10,6 +10,7 @@ Main modules:
 - `DevWidgets.PTracker`: progress tracking API/widget for long-running elaboration.
 - `DevWidgets.InfoTreeExplorer`: cursor-focused info tree explorer.
 - `DevWidgets.DocString`: cursor-focused docstring inspector (currently draft/demo).
+- `DevWidgets.SnapshotExplorer`: experimental live file/command/nested snapshot observation.
 
 ## Where To Look First
 
@@ -26,6 +27,7 @@ Useful example entry points:
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
 - `examples/Configuration.lean`
+- `examples/SnapshotExplorer.lean`
 
 ## Development Workflow
 
@@ -73,6 +75,7 @@ When touching specific areas, also run focused checks:
 - DocString resolution/rendering: `lake env lean tests/DocString/Resolver.lean` and `lake env lean tests/DocString/VersoLean.lean`
 - CE schema/RPC surface: `lake env lean tests/CE/RpcAndSchema.lean`
 - PTracker RPC surface: `lake env lean tests/PTracker/RpcContracts.lean`
+- Snapshot observation: `lake env lean tests/SnapshotExplorer/Observe.lean` and the real-server suite below.
 - Lib resource helpers: `lake env lean tests/Lib/Resource.lean`
 - Widget JavaScript/RPC payloads: `lake env lean tests/Widget/Runtime.lean`
 - Real Lean-server activation/RPC integration: `lake env lean tests/Widget/Server.lean`

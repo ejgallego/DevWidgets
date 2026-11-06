@@ -19,20 +19,23 @@ lake check-test
 
 ## Current suites
 
+- `tests/SnapshotExplorer/Observe.lean`: pending versus available snapshots, bounded breadth/depth, unknown types, unpositioned reporting, cancellation-token preservation, and JSON defaults/round trips.
+- `tests/SnapshotExplorer/Gate.lean`: imported test-only gate and controller used by the server suite; no gate is part of the production widget.
+
 - `tests/CE/RpcAndSchema.lean`: canonical CE option-schema coverage.
 - `tests/CE/Compilation.lean`: actual IR/LCNF recompilation in a module with postponed compilation.
 - `tests/PTracker/RpcContracts.lean`: progress success/failure/interruption, idempotent closure/deletion, and headless retention.
 - `tests/InfoTreeExplorer/AtPos.lean`: InfoTree explorer at-pos regression checks.
 - `tests/InfoTreeExplorer/RpcContracts.lean`: structured preview round trips and node-budget checks.
 - `tests/Lib/Resource.lean`: `DevWidgets.Lib.withResource`/`withResourceUnit` behavior.
-- `tests/Rpc/QualifiedMethodNames.lean`: executable registration of all six RPC methods (actual frontend names are checked by the runtime suite).
+- `tests/Rpc/QualifiedMethodNames.lean`: executable registration of all seven RPC methods (actual frontend names are checked by the runtime suite).
 - `tests/DocString/Resolver.lean`: cursor resolution, doc-comment previews, and declaration candidates.
 - `tests/DocString/VersoLean.lean`: rendering of elaborated Verso docstrings and Lean code.
 - `tests/Widget/Runtime.lean`: runs the shipped JavaScript with Lean-serialized fixtures through
   `tests/Widget/runtime.mjs`, checking CE defaults, InfoTreeExplorer position/budget decoding, and PTracker
   session changes, both same-session read/delete orderings, shared deletion, and cleanup. It also checks pin/follow across files,
   refresh invalidation, presets, typed props, configuration changes, reset behavior, multiline
-  focused previews, accurate availability, and the Markdown-to-host-renderer boundary.
+  focused previews, accurate availability, and the Markdown-to-host-renderer boundary. SnapshotExplorer checks serialized polling, queued selection, freeze/resume, edit-version rejection, session replacement, manual mode, and subscription cleanup.
   The hook driver controls effects and
   timers; it does not test browser layout or replace a VSCode InfoView smoke test.
 - `tests/Widget/Activation.lean`: panel-free API imports, RPC registration, typed configuration, and local hiding.
@@ -40,8 +43,9 @@ lake check-test
   repeated `configure_panel_widget` replaces imported instances and restores them after a section.
 - `tests/Widget/Server.lean`: starts a real Lean language server through
   `tests/Widget/server.mjs` and checks panel activation, section scoping, serialized
-  configuration, JavaScript retrieval, all six widget RPC endpoints, repeated CE
+  configuration, JavaScript retrieval, the original six widget RPC endpoints, repeated CE
   recompilation, edits, and progress registry sharing/isolation across sessions/files.
+  The snapshot tests hold a command behind a controlled gate and verify observation and anchor panel discovery before release, nested tactic inspection, and edits that cancel blocked elaboration.
   Fixtures are opened as in-memory documents; the test does not modify source files.
   Requests and the whole run have timeouts; malformed transport data rejects pending
   requests, and the server is shut down after success or failure.
@@ -87,3 +91,18 @@ Use **Lean 4: Server: Restart File** before each run to recreate the deleted sam
 The script drives the focused controls and deletes the completed fixture task, so use
 the dedicated window and fixture. Close the window when finished. Inspect the resulting
 screenshots for theme contrast and visual hierarchy; automated checks do not replace that review.
+
+### Snapshot Explorer
+
+Open `examples/SnapshotExplorer.lean` in a separate isolated VSCode window, with
+InfoView on its final `#check`, then run:
+
+```bash
+node tests/SnapshotExplorer/browser.mjs 9232 900 /tmp/snapshot-ui.png
+```
+
+Use the matching `--remote-debugging-port=9232` when opening that window. This suite
+checks nested disclosures, selection, disclosure persistence through refresh,
+keyboard focus across freeze/resume, and horizontal overflow. Repeat at a wider
+window width and in a light theme. Both browser suites share `tests/Widget/cdp.mjs`.
+The screenshot remains a manual visual review, separate from these DOM assertions.

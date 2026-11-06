@@ -1,3 +1,4 @@
+import DevWidgets.SnapshotExplorer.API
 import DevWidgets.CE.API
 import DevWidgets.DocString.API
 import DevWidgets.InfoTreeExplorer.API
@@ -10,11 +11,12 @@ open Lean
 #eval show MetaM Unit from do
   unless (← Widget.evalPanelWidgets).isEmpty do
     throwError "API imports must not enable panels"
-  for method in [`DevWidgets.CE.irAtPos, `DevWidgets.DocString.docAtPos,
+  for method in [`DevWidgets.SnapshotExplorer.readSnapshots, `DevWidgets.CE.irAtPos, `DevWidgets.DocString.docAtPos,
       `DevWidgets.InfoTreeExplorer.infoTreeAtPos, `DevWidgets.PTracker.readProgressViewRpc] do
     unless (Server.userRpcProcedures.find? (← getEnv) method).isSome do
       throwError "API import did not register {method}"
 
+show_panel_widgets [local DevWidgets.SnapshotExplorer.snapshotWidget with DevWidgets.SnapshotExplorer.Config.manual]
 show_panel_widgets [local DevWidgets.CE.compilerExplorerWidget with DevWidgets.CE.Config.verbose]
 show_panel_widgets [local DevWidgets.DocString.docStringWidget with DevWidgets.DocString.Config.expanded]
 show_panel_widgets [local DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget with DevWidgets.InfoTreeExplorer.Config.focused]
@@ -22,8 +24,8 @@ show_panel_widgets [local DevWidgets.PTracker.progressWidget with DevWidgets.PTr
 
 #eval show MetaM Unit from do
   let panels ← Widget.evalPanelWidgets
-  unless panels.size == 4 do
-    throwError "expected four independently configured panels"
+  unless panels.size == 5 do
+    throwError "expected five independently configured panels"
   let some progress := panels.find? (·.id == `DevWidgets.PTracker.progressWidget)
     | throwError "missing progress panel"
   let props := progress.props.run' {}
@@ -34,5 +36,5 @@ show_panel_widgets [local DevWidgets.PTracker.progressWidget with DevWidgets.PTr
 show_panel_widgets [-DevWidgets.PTracker.progressWidget]
 
 #eval show MetaM Unit from do
-  unless (← Widget.evalPanelWidgets).size == 3 do
+  unless (← Widget.evalPanelWidgets).size == 4 do
     throwError "hiding a panel should leave the other panels enabled"

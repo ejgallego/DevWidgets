@@ -233,11 +233,86 @@ def serverWidgetExample : Nat := 42
   const editedPanels = await call('Lean.Widget.getWidgets', configured, configured);
   assert.deepEqual(editedPanels.widgets.find(w => w.id === 'DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget').props,
     { maxChildren: 60, maxDepth: 48, maxNodes: 8192 });
+  // A controlled gate proves observation returns BEFORE elaboration completes.
+  const snapshotUri = pathToFileURL(resolve('tests/Widget/SnapshotFixture.lean')).href;
+  const gateSource = `import tests.SnapshotExplorer.Gate
+theorem snapshotExample (n : Nat) : n = n := by rfl
+#check Nat -- anchor
+snapshot_test_gate
+#check Nat -- after gate
+`;
+  open(snapshotUri, gateSource);
+  const snapshotSession = await connect(snapshotUri);
+  const anchor = { line: gateSource.split('\n').findIndex(l => l.endsWith('-- anchor')), character: 8 };
+  const afterGate = { line: gateSource.split('\n').findIndex(l => l.endsWith('-- after gate')), character: 8 };
+  const snapshotCall = (method, params, at = afterGate) => rpc(snapshotSession, snapshotUri, at, method, params);
+  // Calling from AFTER the gate must still find imported handlers before the gate.
+  while (!(await snapshotCall('DevWidgets.Tests.SnapshotExplorer.gate', false))) { /* readiness, not a fixed sleep */ }
+  const pendingView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
+  assert.equal(pendingView.version, 1);
+  assert.equal(pendingView.frontier, 'pending');
+  const blocked = pendingView.commands.find(row => !row.mainReady);
+  assert.ok(blocked, 'gated command should be discovered but unfinished');
+  const detail = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {
+    version: 1, command: blocked.index, maxNodes: 8
+  });
+  assert.equal(detail.selected, blocked.index);
+  assert.ok(detail.nodes.some(node => node.label === 'Main elaborator' && !node.ready));
+  assert.ok(detail.nodes.length <= 8);
+  const limited = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { maxCommands: 1 });
+  assert.equal(limited.commands.length, 1);
+  assert.equal(limited.frontier, 'limited');
+  // Panel discovery succeeds at an already elaborated anchor while later work is pending.
+  const snapshotPanels = await snapshotCall('Lean.Widget.getWidgets', anchor, anchor);
+  assert.equal(snapshotPanels.widgets.filter(w => w.id === 'DevWidgets.SnapshotExplorer.snapshotWidget').length, 1);
+  await snapshotCall('DevWidgets.Tests.SnapshotExplorer.gate', true);
+  await request('textDocument/hover', { textDocument: { uri: snapshotUri }, position: afterGate });
+  const readyView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
+  assert.equal(readyView.frontier, 'complete');
+  assert.ok(readyView.commands.every(row => row.mainReady && row.infoReady));
+  const declaration = readyView.commands.find(row => row.label.startsWith('theorem snapshotExample'));
+  assert.ok(declaration, 'source excerpt missing');
+  const nested = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', {
+    version: 1, command: declaration.index
+  });
+  assert.ok(nested.nodes.some(node => node.label === 'Tactics'), JSON.stringify(nested.nodes));
+  assert.ok(nested.nodes.some(node => node.label === 'Tactic result'), JSON.stringify(nested.nodes));
+  assert.equal(nested.truncated, false);
+  // The same session observes a new document version; old node selection is not reused.
+  notify('textDocument/didChange', {
+    textDocument: { uri: snapshotUri, version: 2 }, contentChanges: [{ text: gateSource + '\n-- edited\n' }]
+  });
+  await request('textDocument/hover', { textDocument: { uri: snapshotUri }, position: afterGate });
+  const editedView = await snapshotCall('DevWidgets.SnapshotExplorer.readSnapshots', { version: 1, command: blocked.index });
+  assert.equal(editedView.version, 2);
+  assert.equal(editedView.selected, undefined);
+  assert.deepEqual(editedView.nodes, []);
+  notify('textDocument/didClose', { textDocument: { uri: snapshotUri } });
+  // Editing away a still-blocked command cancels it; observation must follow the new tree.
+  const editingUri = pathToFileURL(resolve('tests/Widget/EditingSnapshotFixture.lean')).href;
+  open(editingUri, gateSource);
+  const editingSession = await connect(editingUri);
+  const editingCall = (method, params) => rpc(editingSession, editingUri, afterGate, method, params);
+  while (!(await editingCall('DevWidgets.Tests.SnapshotExplorer.gate', false))) {}
+  const beforeEdit = await editingCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
+  assert.equal(beforeEdit.frontier, 'pending');
+  notify('textDocument/didChange', {
+    textDocument: { uri: editingUri, version: 2 },
+    contentChanges: [{ text: gateSource.replace('snapshot_test_gate', '-- gate removed') }]
+  });
+  await request('textDocument/hover', { textDocument: { uri: editingUri }, position: afterGate });
+  const afterEdit = await editingCall('DevWidgets.SnapshotExplorer.readSnapshots', {});
+  assert.equal(afterEdit.version, 2);
+  assert.equal(afterEdit.frontier, 'complete');
+  notify('textDocument/didClose', { textDocument: { uri: editingUri } });
   for (const [file, messages] of diagnostics) {
     assert.deepEqual(messages.filter(message => message.severity === 1), [], `Lean errors in ${file}`);
   }
   notify('textDocument/didClose', { textDocument: { uri: otherUri } });
   notify('textDocument/didClose', { textDocument: { uri } });
+} catch (error) {
+  error.message += `\nLean stderr: ${stderr}`;
+  throw error;
 } finally {
   clearTimeout(watchdog);
   if (server.exitCode === null && server.signalCode === null) {

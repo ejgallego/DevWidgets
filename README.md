@@ -1,7 +1,7 @@
 # Lean Dev Widgets
 
 Interactive Lean infoview widgets for compiler output, progress tracking,
-info trees, and docstring inspection.
+info trees, live elaboration snapshots, and docstring inspection.
 
 Current development target: `leanprover/lean4:v4.36.0-rc2` (from `lean-toolchain`).
 
@@ -15,6 +15,7 @@ Each widget works independently. Import its short module name to enable its pane
 | Monitor a long-running tactic or command | `DevWidgets.PTracker` |
 | Investigate elaboration around the cursor | `DevWidgets.InfoTreeExplorer` |
 | Read Markdown/Verso documentation | `DevWidgets.DocString` |
+| Watch file elaboration and inspect snapshots | `DevWidgets.SnapshotExplorer` |
 
 Use the corresponding `.API` import to access definitions and RPC handlers without
 enabling a panel. For example, `import DevWidgets.PTracker.API` provides the progress
@@ -39,6 +40,7 @@ Then open any file from `examples/` in Lean/VSCode:
 - `examples/InfoTreeFocused.lean`
 - `examples/DocString.lean`
 - `examples/Configuration.lean`
+- `examples/SnapshotExplorer.lean`
 
 ## Activation and configuration
 
@@ -73,9 +75,10 @@ Configurations and task presets stay specific to each widget:
 | InfoTreeExplorer | `maxChildren`, `maxDepth`, `maxNodes` | `InfoTreeExplorer.Config.focused`, `.detailed` |
 | DocString | `maxHeight` in pixels | `DocString.Config.expanded` |
 | PTracker | `autoRefresh`, `intervalMs`, `autoRemove`, `retainDoneMs` | `PTracker.Config.quiet`, `.manual` |
+| SnapshotExplorer | `autoRefresh`, `intervalMs`, `maxCommands`, `maxNodes`, `maxDepth` | `SnapshotExplorer.Config.manual` |
 
 All names above are under `DevWidgets`. An empty `Config` uses the widget's defaults.
-See [`examples/Configuration.lean`](./examples/Configuration.lean) for all four widgets.
+See [`examples/Configuration.lean`](./examples/Configuration.lean) for the original four widgets; see `examples/SnapshotExplorer.lean` for live snapshots.
 
 CE, InfoTreeExplorer, and DocString share **Pin result**, **Follow cursor**, **Refresh**,
 and **Reset panel** controls. Pinning freezes the displayed response and its source
@@ -185,6 +188,63 @@ import DevWidgets.InfoTreeExplorer
 ```
 
 Example files: `examples/InfoViewExplorer.lean`, `examples/InfoTreeFocused.lean`.
+
+## `DevWidgets.SnapshotExplorer`
+
+Experimental live observation of Lean's file elaboration snapshots, targeting Lean 4.36-rc2.
+
+```lean
+import DevWidgets.SnapshotExplorer
+
+configure_panel_widget DevWidgets.SnapshotExplorer.snapshotWidget with
+  ({ intervalMs := 500, maxNodes := 128 } : DevWidgets.SnapshotExplorer.Config)
+```
+
+The panel lists discovered commands in source order. **Main returned**, **InfoTree ready**,
+and **Reporting ready** describe distinct snapshot tasks: a returned main elaborator can
+still have asynchronous children. Reporting readiness describes the reporting root, not
+completion of all its children. Command discovery finishing does not imply that all work
+is done. Counts cover the captured portion; there is no inferred completion percentage.
+
+Select a command to inspect declaration, tactic, and reporting snapshots. Details include
+source locations, local message counts, fatal status, and InfoTree availability. The counts
+are local to each node, not a deduplicated diagnostic total. Unknown dynamic snapshot types
+are labeled unsupported instead of invoking their potentially expensive tree conversion.
+The panel observes available results; it does not reconstruct a dependency graph, measure
+execution timings, or infer reuse from pointer identities.
+
+**Freeze capture** preserves the displayed data and file version in the browser, without
+retaining server-side snapshots. **Resume live** observes the current panel's file again.
+Source navigation and command selection are disabled on frozen captures because their
+locations may be obsolete. **Auto-refresh** controls polling; disabling it still permits
+initial capture, explicit refresh, and command inspection. **Reset panel** restores the
+Lean configuration and resumes observation.
+
+For long-running elaboration, open InfoView on an already completed command and pin that
+InfoView position before editing later commands. This is the host InfoView pin, distinct
+from Freeze capture. Lean discovers panels through elaboration information, so a panel may
+not first appear at a blocked command. The imported widget also cannot observe its own
+initial import loading. See `examples/SnapshotExplorer.lean` for an anchor and a small proof.
+
+Polling defaults to 500 ms (clamped to 100–60,000). The command prefix defaults to 200
+(maximum 2,000); selected-command capture defaults to 128 nodes (1–2,048) and depth 12
+(0–32). Limits apply before expanding tasks; truncated captures are labeled. These limits
+bound widget traversal, not Lean's elaboration or the size of its original syntax data.
+The panel serializes requests, rejects stale responses after observed edits/session changes,
+and disposes polling and notification subscriptions on unmount.
+
+The panel-free `DevWidgets.SnapshotExplorer.API` import registers
+`DevWidgets.SnapshotExplorer.readSnapshots`. Its optional limits use the configuration
+field names; optional `version` and `command` select a command index in that exact document
+version. Responses contain the file URI/version, command rows, discovery frontier, and
+selected-node capture. A stale selection returns the current overview without detail nodes.
+Node positions and command indices have no identity across document versions or worker
+restarts. This experimental contract may change with Lean's snapshot API.
+
+The observer is separate from the older, unmerged `DevWidgets.Incremental` reuse prototype
+(`0c75c8b`). It does not carry forward that prototype's pointer-fingerprint cache or reuse
+classification. `Observe.lean` contains the version-specific Lean adapter; `Model.lean`
+contains the plain RPC data, and `Widget.lean` owns the observation UI and request lifetime.
 
 ## `DevWidgets.DocString`
 

@@ -1,3 +1,4 @@
+import DevWidgets.SnapshotExplorer
 import DevWidgets.CE
 import DevWidgets.InfoTreeExplorer
 import DevWidgets.PTracker
@@ -19,6 +20,14 @@ namespace DevWidgets.Tests.Widget.Runtime
     lcnf := .unavailable .notCompilableConstant
   }
   let input := Json.mkObj [
+    ("snapshots", toJson DevWidgets.SnapshotExplorer.snapshotWidget.javascript),
+    ("snapshotView", toJson ({
+      uri := "file:///workspace/Example.lean", version := 1, frontier := .pending
+      commands := #[{
+        index := 0, label := "theorem example", range? := none
+        mainReady := true, infoReady := false, reportingReady := false, fatal := false
+      }]
+    } : DevWidgets.SnapshotExplorer.View)),
     ("ce", toJson DevWidgets.CE.widgetJs),
     ("infoTree", toJson DevWidgets.InfoTreeExplorer.infoTreeExplorerWidget.javascript),
     ("progress", toJson DevWidgets.PTracker.progressWidget.javascript),
